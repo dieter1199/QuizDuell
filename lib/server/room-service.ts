@@ -115,11 +115,9 @@ function reconcileRoomPresence(room: StoredRoom) {
   }
 }
 
-async function maybeAdvanceGame(gameId: string) {
-  const room = findRoomByGameId(gameId);
-
-  if (!room || !room.game || room.game.status !== "active" || room.game.phase === "finished") {
-    return room?.game ?? null;
+async function maybeAdvanceGame(room: StoredRoom) {
+  if (!room.game || room.game.status !== "active" || room.game.phase === "finished") {
+    return room.game ?? null;
   }
 
   const game = room.game;
@@ -239,8 +237,10 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
   reconcileRoomPresence(room);
 
   if (room.game) {
-    await maybeAdvanceGame(room.game.id);
+    await maybeAdvanceGame(room);
   }
+
+  await setRoomInStore(room);
 
   const categories = await getCategoryBank();
   const players = getPlayersForRoom(room);
@@ -316,7 +316,7 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
 }
 
 async function assertHost(roomCode: string, actorToken: string) {
-  const room = getRoomFromStore(roomCode);
+  const room = await getRoomFromStore(roomCode);
 
   if (!room) {
     throw new ApiError(404, "This room no longer exists.");
@@ -332,7 +332,7 @@ async function assertHost(roomCode: string, actorToken: string) {
 }
 
 export async function getRoomSnapshot(roomCode: string, playerToken?: string) {
-  const room = getRoomFromStore(roomCode);
+  const room = await getRoomFromStore(roomCode);
 
   if (!room) {
     throw new ApiError(404, "This room does not exist anymore.");
@@ -349,7 +349,7 @@ export async function createRoom(displayName: string, playerToken: string) {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const candidate = generateRoomCode();
 
-    if (!getRoomFromStore(candidate)) {
+    if (!(await getRoomFromStore(candidate))) {
       roomCode = candidate;
       break;
     }
@@ -388,13 +388,13 @@ export async function createRoom(displayName: string, playerToken: string) {
     game: null,
   };
 
-  setRoomInStore(room);
+  await setRoomInStore(room);
 
   return { roomCode };
 }
 
 export async function joinRoom(roomCode: string, displayName: string, playerToken: string) {
-  const room = getRoomFromStore(roomCode);
+  const room = await getRoomFromStore(roomCode);
 
   if (!room || room.status === "closed") {
     throw new ApiError(404, "That room is no longer available.");
@@ -442,7 +442,7 @@ export async function joinRoom(roomCode: string, displayName: string, playerToke
 }
 
 export async function updateHeartbeat(roomCode: string, playerToken: string) {
-  const room = getRoomFromStore(roomCode);
+  const room = await getRoomFromStore(roomCode);
 
   if (!room || room.status === "closed") {
     throw new ApiError(404, "This room has already closed.");
@@ -462,7 +462,7 @@ export async function updateHeartbeat(roomCode: string, playerToken: string) {
 }
 
 export async function leaveRoom(roomCode: string, playerToken: string) {
-  const room = getRoomFromStore(roomCode);
+  const room = await getRoomFromStore(roomCode);
 
   if (!room) {
     return;
@@ -484,8 +484,10 @@ export async function leaveRoom(roomCode: string, playerToken: string) {
   touchRoom(room);
 
   if (room.game && !player.is_host) {
-    await maybeAdvanceGame(room.game.id);
+    await maybeAdvanceGame(room);
   }
+
+  await setRoomInStore(room);
 }
 
 export async function kickPlayer(roomCode: string, actorToken: string, playerId: string) {
@@ -506,7 +508,7 @@ export async function kickPlayer(roomCode: string, actorToken: string, playerId:
   touchRoom(room);
 
   if (room.game) {
-    await maybeAdvanceGame(room.game.id);
+    await maybeAdvanceGame(room);
   }
 
   return buildSnapshot(room, actorToken);
@@ -593,13 +595,13 @@ export async function startGame(roomCode: string, actorToken: string) {
 }
 
 export async function submitAnswer(gameId: string, playerToken: string, selectedIndexes: number[]) {
-  const room = findRoomByGameId(gameId);
+  const room = await findRoomByGameId(gameId);
 
   if (!room || !room.game) {
     throw new ApiError(404, "This duel does not exist.");
   }
 
-  await maybeAdvanceGame(gameId);
+  await maybeAdvanceGame(room);
 
   const game = room.game;
 
@@ -651,22 +653,22 @@ export async function submitAnswer(gameId: string, playerToken: string, selected
   });
   touchRoom(room);
 
-  await maybeAdvanceGame(gameId);
+  await maybeAdvanceGame(room);
 
   return buildSnapshot(room, playerToken);
 }
 
 export async function advanceGame(gameId: string, playerToken?: string) {
-  const game = await maybeAdvanceGame(gameId);
-
-  if (!game) {
-    throw new ApiError(404, "This duel does not exist.");
-  }
-
-  const room = findRoomByGameId(gameId);
+  const room = await findRoomByGameId(gameId);
 
   if (!room) {
     throw new ApiError(404, "This room no longer exists.");
+  }
+
+  const game = await maybeAdvanceGame(room);
+
+  if (!game) {
+    throw new ApiError(404, "This duel does not exist.");
   }
 
   return buildSnapshot(room, playerToken);

@@ -9,6 +9,9 @@ import {
 import { handleApiError, jsonOk } from "@/lib/server/api";
 import { roomActionSchema } from "@/lib/validation";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 type RouteContext = {
   params: Promise<{
     code: string;

@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { getCache } from "@vercel/functions";
+
 import type { GameRoundRow, GameSessionRecord, PlayerAnswerRow, RoomPlayerRow, RoomRecord } from "@/types/app";
 
 export type StoredGameSession = GameSessionRecord & {
@@ -14,6 +16,7 @@ export type StoredRoom = RoomRecord & {
 
 type GlobalStore = {
   roomsByCode: Map<string, StoredRoom>;
+  gameIdToRoomCode: Map<string, string>;
 };
 
 const globalStore = globalThis as typeof globalThis & {
@@ -23,7 +26,28 @@ const globalStore = globalThis as typeof globalThis & {
 function createStore(): GlobalStore {
   return {
     roomsByCode: new Map<string, StoredRoom>(),
+    gameIdToRoomCode: new Map<string, string>(),
   };
+}
+
+const ROOM_TTL_SECONDS = 60 * 60 * 12;
+const ROOM_KEY_PREFIX = "quizduell:room";
+const GAME_KEY_PREFIX = "quizduell:game";
+
+type RuntimeCache = ReturnType<typeof getCache>;
+
+let runtimeCachePromise: Promise<RuntimeCache | null> | null = null;
+
+function cloneRoom(room: StoredRoom) {
+  return structuredClone(room);
+}
+
+function roomKey(roomCode: string) {
+  return `${ROOM_KEY_PREFIX}:${roomCode}`;
+}
+
+function gameKey(gameId: string) {
+  return `${GAME_KEY_PREFIX}:${gameId}`;
 }
 
 export function getRoomStore() {
@@ -34,20 +58,93 @@ export function getRoomStore() {
   return globalStore.__quizduellStore;
 }
 
-export function getRoomFromStore(roomCode: string) {
-  return getRoomStore().roomsByCode.get(roomCode) ?? null;
-}
-
-export function setRoomInStore(room: StoredRoom) {
-  getRoomStore().roomsByCode.set(room.code, room);
-}
-
-export function findRoomByGameId(gameId: string) {
-  for (const room of getRoomStore().roomsByCode.values()) {
-    if (room.game?.id === gameId) {
-      return room;
-    }
+async function getRuntimeCache() {
+  if (process.env.VERCEL !== "1") {
+    return null;
   }
 
-  return null;
+  if (!runtimeCachePromise) {
+    runtimeCachePromise = import("@vercel/functions")
+      .then((module) => module.getCache())
+      .catch(() => null);
+  }
+
+  return runtimeCachePromise;
+}
+
+export async function getRoomFromStore(roomCode: string) {
+  const cache = await getRuntimeCache();
+
+  if (!cache) {
+    const room = getRoomStore().roomsByCode.get(roomCode);
+    return room ? cloneRoom(room) : null;
+  }
+
+  const room = (await cache.get(roomKey(roomCode))) as StoredRoom | undefined;
+  return room ? cloneRoom(room) : null;
+}
+
+export async function setRoomInStore(room: StoredRoom) {
+  const roomCopy = cloneRoom(room);
+  const activeGameId = roomCopy.game?.id ?? roomCopy.current_game_id ?? null;
+  const cache = await getRuntimeCache();
+
+  if (!cache) {
+    const store = getRoomStore();
+    store.roomsByCode.set(roomCopy.code, roomCopy);
+
+    if (activeGameId) {
+      store.gameIdToRoomCode.set(activeGameId, roomCopy.code);
+    }
+
+    return;
+  }
+
+  await cache.set(roomKey(roomCopy.code), roomCopy, {
+    ttl: ROOM_TTL_SECONDS,
+    tags: ["quizduell", `room:${roomCopy.code}`],
+  });
+
+  if (activeGameId) {
+    await cache.set(gameKey(activeGameId), roomCopy.code, {
+      ttl: ROOM_TTL_SECONDS,
+      tags: ["quizduell", `game:${activeGameId}`],
+    });
+  }
+}
+
+export async function findRoomByGameId(gameId: string) {
+  const cache = await getRuntimeCache();
+
+  if (!cache) {
+    const roomCode = getRoomStore().gameIdToRoomCode.get(gameId);
+
+    if (!roomCode) {
+      return null;
+    }
+
+    const room = getRoomStore().roomsByCode.get(roomCode);
+
+    if (!room || room.game?.id !== gameId) {
+      getRoomStore().gameIdToRoomCode.delete(gameId);
+      return null;
+    }
+
+    return cloneRoom(room);
+  }
+
+  const roomCode = (await cache.get(gameKey(gameId))) as string | undefined;
+
+  if (!roomCode) {
+    return null;
+  }
+
+  const room = await getRoomFromStore(roomCode);
+
+  if (!room || room.game?.id !== gameId) {
+    await cache.delete(gameKey(gameId));
+    return null;
+  }
+
+  return room;
 }

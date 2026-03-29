@@ -2,6 +2,9 @@ import { advanceGame, submitAnswer } from "@/lib/server/room-service";
 import { handleApiError, jsonOk } from "@/lib/server/api";
 import { gameActionSchema } from "@/lib/validation";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 type RouteContext = {
   params: Promise<{
     gameId: string;

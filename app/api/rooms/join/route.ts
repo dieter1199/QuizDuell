@@ -2,6 +2,9 @@ import { joinRoom } from "@/lib/server/room-service";
 import { handleApiError, jsonOk } from "@/lib/server/api";
 import { joinRoomSchema } from "@/lib/validation";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
