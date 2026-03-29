@@ -95,6 +95,7 @@ export function RoomPage({ code }: RoomPageProps) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<RoomSettings | null>(null);
+  const [isSettingsDraftDirty, setIsSettingsDraftDirty] = useState(false);
   const [now, setNow] = useState(Date.now());
   const seenSubmissionIdsRef = useRef<Set<string>>(new Set());
 
@@ -112,9 +113,13 @@ export function RoomPage({ code }: RoomPageProps) {
 
   useEffect(() => {
     if (room.snapshot?.room.settings) {
+      if (settingsDraft && isSettingsDraftDirty) {
+        return;
+      }
+
       setSettingsDraft(room.snapshot.room.settings);
     }
-  }, [room.snapshot?.room.settings]);
+  }, [isSettingsDraftDirty, room.snapshot?.room.settings, settingsDraft]);
 
   useEffect(() => {
     setSelectedIndexes([]);
@@ -211,6 +216,11 @@ export function RoomPage({ code }: RoomPageProps) {
     sounds.playSelectSound();
   };
 
+  const updateSettingsDraftLocally = (updater: (current: RoomSettings) => RoomSettings) => {
+    setIsSettingsDraftDirty(true);
+    setSettingsDraft((current) => (current ? updater(current) : current));
+  };
+
   const handleLeave = async () => {
     try {
       await room.leaveRoom();
@@ -256,6 +266,8 @@ export function RoomPage({ code }: RoomPageProps) {
         actorToken: room.snapshot.me.player_token,
         settings: parsed.data,
       });
+      setSettingsDraft(parsed.data);
+      setIsSettingsDraftDirty(false);
       setStatusMessage("Game settings updated.");
     } catch (saveError) {
       setStatusMessage(saveError instanceof Error ? saveError.message : "Unable to save settings.");
@@ -525,11 +537,10 @@ export function RoomPage({ code }: RoomPageProps) {
                             type="number"
                             value={settingsDraft.questionCount}
                             onChange={(event) =>
-                              setSettingsDraft((current) =>
-                                current
-                                  ? { ...current, questionCount: Number(event.target.value || 20) }
-                                  : current,
-                              )
+                              updateSettingsDraftLocally((current) => ({
+                                ...current,
+                                questionCount: Number(event.target.value || 20),
+                              }))
                             }
                           />
                         </label>
@@ -541,11 +552,10 @@ export function RoomPage({ code }: RoomPageProps) {
                             type="number"
                             value={settingsDraft.timerSeconds}
                             onChange={(event) =>
-                              setSettingsDraft((current) =>
-                                current
-                                  ? { ...current, timerSeconds: Number(event.target.value || 10) }
-                                  : current,
-                              )
+                              updateSettingsDraftLocally((current) => ({
+                                ...current,
+                                timerSeconds: Number(event.target.value || 10),
+                              }))
                             }
                           />
                         </label>
@@ -557,11 +567,10 @@ export function RoomPage({ code }: RoomPageProps) {
                             type="number"
                             value={settingsDraft.pointsPerQuestion}
                             onChange={(event) =>
-                              setSettingsDraft((current) =>
-                                current
-                                  ? { ...current, pointsPerQuestion: Number(event.target.value || 10) }
-                                  : current,
-                              )
+                              updateSettingsDraftLocally((current) => ({
+                                ...current,
+                                pointsPerQuestion: Number(event.target.value || 10),
+                              }))
                             }
                           />
                         </label>
@@ -574,11 +583,10 @@ export function RoomPage({ code }: RoomPageProps) {
                               checked={settingsDraft.randomizeQuestionOrder}
                               type="checkbox"
                               onChange={(event) =>
-                                setSettingsDraft((current) =>
-                                  current
-                                    ? { ...current, randomizeQuestionOrder: event.target.checked }
-                                    : current,
-                                )
+                                updateSettingsDraftLocally((current) => ({
+                                  ...current,
+                                  randomizeQuestionOrder: event.target.checked,
+                                }))
                               }
                             />
                           </label>
@@ -588,11 +596,10 @@ export function RoomPage({ code }: RoomPageProps) {
                               checked={settingsDraft.randomizeAnswerOrder}
                               type="checkbox"
                               onChange={(event) =>
-                                setSettingsDraft((current) =>
-                                  current
-                                    ? { ...current, randomizeAnswerOrder: event.target.checked }
-                                    : current,
-                                )
+                                updateSettingsDraftLocally((current) => ({
+                                  ...current,
+                                  randomizeAnswerOrder: event.target.checked,
+                                }))
                               }
                             />
                           </label>
@@ -602,9 +609,10 @@ export function RoomPage({ code }: RoomPageProps) {
                               checked={settingsDraft.showExplanations}
                               type="checkbox"
                               onChange={(event) =>
-                                setSettingsDraft((current) =>
-                                  current ? { ...current, showExplanations: event.target.checked } : current,
-                                )
+                                updateSettingsDraftLocally((current) => ({
+                                  ...current,
+                                  showExplanations: event.target.checked,
+                                }))
                               }
                             />
                           </label>
@@ -627,18 +635,12 @@ export function RoomPage({ code }: RoomPageProps) {
                                   checked={settingsDraft.selectedCategoryIds.includes(category.id)}
                                   type="checkbox"
                                   onChange={(event) =>
-                                    setSettingsDraft((current) =>
-                                      current
-                                        ? {
-                                            ...current,
-                                            selectedCategoryIds: event.target.checked
-                                              ? [...current.selectedCategoryIds, category.id]
-                                              : current.selectedCategoryIds.filter(
-                                                  (value) => value !== category.id,
-                                                ),
-                                          }
-                                        : current,
-                                    )
+                                    updateSettingsDraftLocally((current) => ({
+                                      ...current,
+                                      selectedCategoryIds: event.target.checked
+                                        ? Array.from(new Set([...current.selectedCategoryIds, category.id]))
+                                        : current.selectedCategoryIds.filter((value) => value !== category.id),
+                                    }))
                                   }
                                 />
                               </label>
