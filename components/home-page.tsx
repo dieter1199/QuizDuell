@@ -73,7 +73,7 @@ export function HomePage() {
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-amber-200/70">Realtime quiz duel</p>
-            <h1 className="mt-2 text-4xl font-semibold tracking-tight md:text-6xl">QuizDuell Live</h1>
+            <h1 className="mt-2 text-4xl font-semibold tracking-tight md:text-6xl">AngelscheinDuell Live</h1>
           </div>
 
           <div className="flex items-center gap-3">
@@ -90,11 +90,10 @@ export function HomePage() {
             <div className="relative">
               <Badge tone="warm">Fast rooms. Live leaderboard. Shared lobby.</Badge>
               <h2 className="mt-5 max-w-2xl text-3xl font-semibold leading-tight md:text-5xl">
-                Host a study duel in seconds and race through synchronized trivia rounds.
+                Der Angelschein macht sich nicht von alleine!
               </h2>
               <p className="mt-4 max-w-2xl text-base text-slate-300 md:text-lg">
-                Create a room, share the code, pick categories, and let the timer do the rest. Built for quick
-                multiplayer learning sessions across desktop and mobile.
+                Erstell einen Raum, share den code, pick Kategorien, und beweise deine Kenntnisse.
               </p>
 
               <div className="mt-8 grid gap-4 md:grid-cols-3">
@@ -107,8 +106,8 @@ export function HomePage() {
                   <p className="mt-2 text-3xl font-semibold">Realtime</p>
                 </div>
                 <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                  <p className="text-sm text-slate-300">Question bank</p>
-                  <p className="mt-2 text-3xl font-semibold">Editable</p>
+                  <p className="text-sm text-slate-300">Developed By:</p>
+                  <p className="mt-2 text-3xl font-semibold">Dieter Holstein</p>
                 </div>
               </div>
             </div>

@@ -30,7 +30,7 @@ import { useProfile } from "@/hooks/use-profile";
 import { useQuizSounds } from "@/hooks/use-quiz-sounds";
 import { useRoom } from "@/hooks/use-room";
 import { requestJson } from "@/lib/fetcher";
-import { copyText, formatCountdown } from "@/lib/utils";
+import { cn, copyText, formatCountdown } from "@/lib/utils";
 import { roomSettingsSchema } from "@/lib/validation";
 import type { CategoryWithQuestions, QuestionInput, RoomSettings } from "@/types/app";
 
@@ -132,6 +132,9 @@ export function RoomPage({ code }: RoomPageProps) {
   const isHost = Boolean(room.snapshot?.me?.is_host);
   const game = room.snapshot?.game;
   const currentRound = game?.currentRound;
+  const isLiveGame = Boolean(
+    game && room.snapshot?.room.status === "active" && game.session.status === "active",
+  );
   const hasSubmitted = Boolean(
     room.snapshot?.me &&
       currentRound?.submissions.some((submission) => submission.player_id === room.snapshot?.me?.id),
@@ -289,8 +292,13 @@ export function RoomPage({ code }: RoomPageProps) {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#10233d_0%,#09111d_52%,#04070d_100%)] px-4 py-6 text-white">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
+      <div className="mx-auto max-w-7xl space-y-4 md:space-y-6">
+        <header
+          className={cn(
+            "flex flex-wrap items-start justify-between gap-4",
+            isLiveGame && "hidden md:flex",
+          )}
+        >
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-amber-200/70">Room {code}</p>
             <h1 className="mt-2 text-4xl font-semibold tracking-tight">Quiz room</h1>
@@ -345,32 +353,51 @@ export function RoomPage({ code }: RoomPageProps) {
         {room.snapshot?.me?.status === "active" && room.snapshot?.room.status !== "closed" ? (
           <div className="grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
             <div className="space-y-6">
-              <Card className="grid gap-4 md:grid-cols-3">
-                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Room code</p>
-                  <p className="mt-3 text-3xl font-semibold tracking-[0.3em]">{code}</p>
-                  <Button className="mt-4 w-full" size="sm" variant="secondary" onClick={handleCopyCode}>
-                    <Copy className="mr-2 size-4" />
-                    Copy code
-                  </Button>
-                </div>
-                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Shareable link</p>
-                  <p className="mt-3 break-all text-sm text-slate-200">{roomLink}</p>
-                  <Button className="mt-4 w-full" size="sm" variant="secondary" onClick={handleCopyLink}>
-                    <Share2 className="mr-2 size-4" />
-                    Copy link
-                  </Button>
-                </div>
-                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Players</p>
-                  <p className="mt-3 text-3xl font-semibold">{activePlayers.length}</p>
-                  <p className="mt-2 text-sm text-slate-300">Need at least 2 active players to start.</p>
+              <Card
+                className={cn(
+                  "p-4 md:p-5",
+                  isLiveGame && "hidden md:block",
+                )}
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                  <div className="flex flex-wrap gap-3">
+                    <div className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Room code</p>
+                      <p className="mt-1 text-xl font-semibold tracking-[0.24em] md:text-2xl">{code}</p>
+                    </div>
+                    <div className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Players</p>
+                      <p className="mt-1 text-xl font-semibold md:text-2xl">{activePlayers.length}</p>
+                    </div>
+                    <div className="min-w-0 flex-1 rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 lg:min-w-[17rem]">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Shareable link</p>
+                      <p className="mt-1 truncate text-sm text-slate-200">{roomLink}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 lg:ml-auto">
+                    <Button size="sm" variant="secondary" onClick={handleCopyCode}>
+                      <Copy className="mr-2 size-4" />
+                      Copy code
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={handleCopyLink}>
+                      <Share2 className="mr-2 size-4" />
+                      Copy link
+                    </Button>
+                  </div>
                 </div>
               </Card>
 
-              {game && room.snapshot?.room.status === "active" && game.session.status === "active" ? (
-                <Card className="space-y-5">
+              {game && isLiveGame ? (
+                <Card className="space-y-4 md:space-y-5">
+                  <div className="flex items-center justify-between gap-3 md:hidden">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone="cool">Room {code}</Badge>
+                      <Badge tone="muted">{activePlayers.length} players</Badge>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={handleLeave}>
+                      Leave
+                    </Button>
+                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2">
@@ -381,11 +408,13 @@ export function RoomPage({ code }: RoomPageProps) {
                           Round {game.session.current_round_number} / {game.session.total_rounds}
                         </Badge>
                       </div>
-                      <h2 className="mt-3 text-3xl font-semibold">{currentRound?.question.prompt}</h2>
+                      <h2 className="mt-3 text-2xl font-semibold leading-tight md:text-3xl">
+                        {currentRound?.question.prompt}
+                      </h2>
                     </div>
-                    <div className="min-w-40 text-right">
+                    <div className="min-w-24 text-right md:min-w-40">
                       <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Timer</p>
-                      <p className="mt-2 text-4xl font-semibold">{phaseSecondsRemaining}</p>
+                      <p className="mt-2 text-3xl font-semibold md:text-4xl">{phaseSecondsRemaining}</p>
                     </div>
                   </div>
 
@@ -773,7 +802,12 @@ export function RoomPage({ code }: RoomPageProps) {
               ) : null}
             </div>
 
-            <div className="space-y-6">
+            <div
+              className={cn(
+                "space-y-6",
+                isLiveGame && "hidden md:block",
+              )}
+            >
               <Card className="space-y-4">
                 <div className="flex items-center gap-3">
                   <Users className="size-5 text-sky-200" />
