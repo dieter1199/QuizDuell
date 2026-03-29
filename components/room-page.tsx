@@ -18,7 +18,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CategoryManager } from "@/components/category-manager";
 import { NameDialog } from "@/components/name-dialog";
@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useProfile } from "@/hooks/use-profile";
+import { useQuizSounds } from "@/hooks/use-quiz-sounds";
 import { useRoom } from "@/hooks/use-room";
 import { requestJson } from "@/lib/fetcher";
 import { copyText, formatCountdown } from "@/lib/utils";
@@ -40,6 +41,18 @@ type CategoryBankResponse = {
 type RoomPageProps = {
   code: string;
 };
+
+function formatLockedByText(displayNames: string[]) {
+  if (displayNames.length === 1) {
+    return `${displayNames[0]} locked in`;
+  }
+
+  if (displayNames.length === 2) {
+    return `${displayNames[0]} + ${displayNames[1]}`;
+  }
+
+  return `${displayNames[0]}, ${displayNames[1]} +${displayNames.length - 2}`;
+}
 
 function AnswerChip({
   selected,
@@ -77,11 +90,13 @@ function AnswerChip({
 export function RoomPage({ code }: RoomPageProps) {
   const router = useRouter();
   const { profile, ready, hasDisplayName, saveProfile } = useProfile();
+  const sounds = useQuizSounds();
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<RoomSettings | null>(null);
   const [now, setNow] = useState(Date.now());
+  const seenSubmissionIdsRef = useRef<Set<string>>(new Set());
 
   const room = useRoom(code, profile && hasDisplayName ? profile : null);
 
@@ -116,6 +131,27 @@ export function RoomPage({ code }: RoomPageProps) {
     room.snapshot?.me &&
       currentRound?.submissions.some((submission) => submission.player_id === room.snapshot?.me?.id),
   );
+  const answerLocks = useMemo(() => {
+    const locks = new Map<number, string[]>();
+
+    if (!currentRound || game?.session.phase !== "question") {
+      return locks;
+    }
+
+    for (const submission of currentRound.submissions) {
+      if (submission.timed_out) {
+        continue;
+      }
+
+      for (const selectedIndex of submission.selected_indexes) {
+        const currentLocks = locks.get(selectedIndex) ?? [];
+        currentLocks.push(submission.displayName);
+        locks.set(selectedIndex, currentLocks);
+      }
+    }
+
+    return locks;
+  }, [currentRound, game?.session.phase]);
   const roomLink = typeof window !== "undefined" ? `${window.location.origin}/room/${code}` : "";
   const phaseMsRemaining = game ? Math.max(0, new Date(game.session.phase_ends_at).getTime() - now) : 0;
   const phaseSecondsRemaining = formatCountdown(phaseMsRemaining);
@@ -130,6 +166,50 @@ export function RoomPage({ code }: RoomPageProps) {
         ),
       )
     : 0;
+  const showQuickLinks = !game || game.session.status !== "active";
+
+  useEffect(() => {
+    if (!currentRound) {
+      seenSubmissionIdsRef.current = new Set();
+      return;
+    }
+
+    const nextSubmissionIds = new Set(currentRound.submissions.map((submission) => submission.id));
+
+    if (seenSubmissionIdsRef.current.size > 0) {
+      const hasNewRemoteLock = currentRound.submissions.some(
+        (submission) =>
+          !seenSubmissionIdsRef.current.has(submission.id) &&
+          submission.player_id !== room.snapshot?.me?.id &&
+          !submission.timed_out,
+      );
+
+      if (hasNewRemoteLock) {
+        sounds.playOtherLockSound();
+      }
+    }
+
+    seenSubmissionIdsRef.current = nextSubmissionIds;
+  }, [currentRound, room.snapshot?.me?.id, sounds]);
+
+  const handleToggleAnswer = (displayIndex: number) => {
+    if (!game || game.session.phase !== "question" || hasSubmitted) {
+      return;
+    }
+
+    if (selectedIndexes.includes(displayIndex)) {
+      setSelectedIndexes(selectedIndexes.filter((item) => item !== displayIndex));
+      sounds.playSelectSound();
+      return;
+    }
+
+    if (selectedIndexes.length >= 2) {
+      return;
+    }
+
+    setSelectedIndexes([...selectedIndexes, displayIndex]);
+    sounds.playSelectSound();
+  };
 
   const handleLeave = async () => {
     try {
@@ -308,35 +388,28 @@ export function RoomPage({ code }: RoomPageProps) {
                     {currentRound?.answers.map((answer) => {
                       const selected = selectedIndexes.includes(answer.displayIndex);
                       const revealed = game.session.phase !== "question";
+                      const lockedBy = answerLocks.get(answer.displayIndex) ?? [];
                       return (
                         <AnswerChip
                           key={`${currentRound.round.id}-${answer.displayIndex}`}
                           selected={selected}
                           disabled={revealed || hasSubmitted}
                           correct={revealed ? answer.isCorrect : false}
-                          onClick={() => {
-                            if (revealed || hasSubmitted) {
-                              return;
-                            }
-
-                            setSelectedIndexes((current) => {
-                              if (current.includes(answer.displayIndex)) {
-                                return current.filter((item) => item !== answer.displayIndex);
-                              }
-
-                              if (current.length >= 2) {
-                                return current;
-                              }
-
-                              return [...current, answer.displayIndex];
-                            });
-                          }}
+                          onClick={() => handleToggleAnswer(answer.displayIndex)}
                         >
-                          <div className="flex items-center justify-between gap-4">
-                            <span>{answer.text}</span>
-                            {game.session.phase !== "question" && answer.isCorrect ? (
-                              <CheckCircle2 className="size-5 text-emerald-200" />
+                          <div className="space-y-3">
+                            {lockedBy.length ? (
+                              <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-amber-300/25 bg-amber-400/12 px-3 py-1 text-xs font-medium text-amber-50">
+                                <span className="size-2 rounded-full bg-amber-200" />
+                                <span className="truncate">{formatLockedByText(lockedBy)}</span>
+                              </div>
                             ) : null}
+                            <div className="flex items-center justify-between gap-4">
+                              <span>{answer.text}</span>
+                              {game.session.phase !== "question" && answer.isCorrect ? (
+                                <CheckCircle2 className="size-5 text-emerald-200" />
+                              ) : null}
+                            </div>
                           </div>
                         </AnswerChip>
                       );
@@ -361,6 +434,7 @@ export function RoomPage({ code }: RoomPageProps) {
                               playerToken: room.snapshot.me.player_token,
                               selectedIndexes,
                             });
+                            sounds.playLockSound();
                             setStatusMessage("Answer locked in.");
                           } catch (submitError) {
                             setStatusMessage(
@@ -807,23 +881,25 @@ export function RoomPage({ code }: RoomPageProps) {
                 </Card>
               ) : null}
 
-              <Card className="space-y-3">
-                <h2 className="text-xl font-semibold">Quick links</h2>
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="secondary" onClick={handleCopyCode}>
-                    Copy code
-                  </Button>
-                  <Button variant="secondary" onClick={handleCopyLink}>
-                    Copy link
-                  </Button>
-                  <Link
-                    href="/categories"
-                    className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/15 bg-white/8 px-4 text-sm font-medium text-white transition hover:bg-white/12"
-                  >
-                    Question bank
-                  </Link>
-                </div>
-              </Card>
+              {showQuickLinks ? (
+                <Card className="space-y-3">
+                  <h2 className="text-xl font-semibold">Quick links</h2>
+                  <div className="flex flex-wrap gap-3">
+                    <Button variant="secondary" onClick={handleCopyCode}>
+                      Copy code
+                    </Button>
+                    <Button variant="secondary" onClick={handleCopyLink}>
+                      Copy link
+                    </Button>
+                    <Link
+                      href="/categories"
+                      className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/15 bg-white/8 px-4 text-sm font-medium text-white transition hover:bg-white/12"
+                    >
+                      Question bank
+                    </Link>
+                  </div>
+                </Card>
+              ) : null}
             </div>
           </div>
         ) : null}
