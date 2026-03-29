@@ -110,7 +110,7 @@ function reconcileRoomPresence(room: StoredRoom) {
 
   const host = room.players.find((player) => player.is_host);
 
-  if (!host || host.status !== "active" || host.connection_status === "offline") {
+  if (!host || host.status !== "active") {
     closeRoom(room, "host_left");
   }
 }
@@ -336,6 +336,16 @@ export async function getRoomSnapshot(roomCode: string, playerToken?: string) {
 
   if (!room) {
     throw new ApiError(404, "This room does not exist anymore.");
+  }
+
+  if (playerToken) {
+    const player = getPlayerByToken(room, playerToken);
+
+    if (player?.status === "active") {
+      player.last_seen_at = nowIso();
+      player.connection_status = "online";
+      touchRoom(room);
+    }
   }
 
   return buildSnapshot(room, playerToken);
