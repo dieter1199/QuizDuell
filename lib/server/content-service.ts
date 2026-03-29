@@ -16,7 +16,14 @@ function nowIso() {
 
 async function readQuestionBankFile() {
   const raw = await fs.readFile(QUESTION_BANK_PATH, "utf8");
-  return JSON.parse(raw) as CategoryWithQuestions[];
+  const normalizedRaw = raw.replace(/^\uFEFF/, "");
+  const parsed = JSON.parse(normalizedRaw) as unknown;
+
+  if (!Array.isArray(parsed)) {
+    throw new ApiError(500, "Question bank data is invalid.");
+  }
+
+  return parsed as CategoryWithQuestions[];
 }
 
 async function writeQuestionBankFile(categories: CategoryWithQuestions[]) {
