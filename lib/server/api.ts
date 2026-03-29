@@ -20,7 +20,18 @@ export function handleApiError(error: unknown) {
   }
 
   if (error instanceof ZodError) {
-    const message = error.issues[0]?.message ?? "Invalid request.";
+    console.warn("[api] validation failed", {
+      issues: error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        message: issue.message,
+      })),
+    });
+
+    const playerTokenIssue = error.issues.find((issue) => issue.path.at(-1) === "playerToken");
+    const message =
+      playerTokenIssue?.message
+        ? "Your local player session is missing. Refresh the page and set your display name again."
+        : error.issues[0]?.message ?? "Invalid request.";
     return Response.json({ error: message }, { status: 400 });
   }
 

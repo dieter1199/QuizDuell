@@ -18,8 +18,12 @@ function createEmptyProfile(): DraftProfile {
   };
 }
 
+function persistProfile(profile: DraftProfile) {
+  window.localStorage.setItem(PLAYER_PROFILE_STORAGE_KEY, JSON.stringify(profile));
+}
+
 export function useProfile() {
-  const [profile, setProfile] = useState<DraftProfile | null>(null);
+  const [profile, setProfile] = useState<DraftProfile>(createEmptyProfile);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -27,23 +31,35 @@ export function useProfile() {
       const stored = window.localStorage.getItem(PLAYER_PROFILE_STORAGE_KEY);
 
       if (!stored) {
-        setProfile(createEmptyProfile());
+        const emptyProfile = createEmptyProfile();
+        setProfile(emptyProfile);
+        persistProfile(emptyProfile);
         setReady(true);
         return;
       }
 
       const parsed = JSON.parse(stored) as Partial<PlayerProfile>;
 
-      if (typeof parsed.displayName === "string" && typeof parsed.playerToken === "string") {
-        setProfile({
+      if (typeof parsed.displayName === "string") {
+        const nextProfile = {
           displayName: parsed.displayName,
-          playerToken: parsed.playerToken,
-        });
+          playerToken:
+            typeof parsed.playerToken === "string" && parsed.playerToken.length > 0
+              ? parsed.playerToken
+              : generatePlayerToken(),
+        };
+
+        setProfile(nextProfile);
+        persistProfile(nextProfile);
       } else {
-        setProfile(createEmptyProfile());
+        const emptyProfile = createEmptyProfile();
+        setProfile(emptyProfile);
+        persistProfile(emptyProfile);
       }
     } catch {
-      setProfile(createEmptyProfile());
+      const emptyProfile = createEmptyProfile();
+      setProfile(emptyProfile);
+      persistProfile(emptyProfile);
     } finally {
       setReady(true);
     }
@@ -56,7 +72,7 @@ export function useProfile() {
     };
 
     setProfile(nextProfile);
-    window.localStorage.setItem(PLAYER_PROFILE_STORAGE_KEY, JSON.stringify(nextProfile));
+    persistProfile(nextProfile);
   };
 
   return {
