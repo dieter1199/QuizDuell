@@ -1,0 +1,302 @@
+[
+  {
+    "id": "a1111111-1111-4111-8111-111111111111",
+    "name": "General Knowledge",
+    "description": "Fast facts, science, history, and everyday trivia.",
+    "created_at": "2026-03-29T16:00:00.000Z",
+    "updated_at": "2026-03-29T16:00:00.000Z",
+    "questions": [
+      {
+        "id": "a1111111-1111-4111-8111-111111111201",
+        "category_id": "a1111111-1111-4111-8111-111111111111",
+        "prompt": "Which planet is known as the Red Planet?",
+        "answers": ["Mars", "Venus", "Saturn"],
+        "correct_answer_indexes": [0],
+        "explanation": "Mars looks red because its surface is rich in iron oxide.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "a1111111-1111-4111-8111-111111111202",
+        "category_id": "a1111111-1111-4111-8111-111111111111",
+        "prompt": "Which of these are prime numbers?",
+        "answers": ["11", "12", "13"],
+        "correct_answer_indexes": [0, 2],
+        "explanation": "11 and 13 are prime. 12 is divisible by 2, 3, 4, and 6.",
+        "difficulty": "medium",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "a1111111-1111-4111-8111-111111111203",
+        "category_id": "a1111111-1111-4111-8111-111111111111",
+        "prompt": "What gas do plants primarily absorb from the atmosphere?",
+        "answers": ["Carbon dioxide", "Oxygen", "Helium"],
+        "correct_answer_indexes": [0],
+        "explanation": "Photosynthesis relies on carbon dioxide, water, and sunlight.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "a1111111-1111-4111-8111-111111111204",
+        "category_id": "a1111111-1111-4111-8111-111111111111",
+        "prompt": "Which two colors mix to make green in traditional color theory?",
+        "answers": ["Blue", "Yellow", "Red"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "Blue and yellow combine to make green.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "a1111111-1111-4111-8111-111111111205",
+        "category_id": "a1111111-1111-4111-8111-111111111111",
+        "prompt": "Which device measures atmospheric pressure?",
+        "answers": ["Barometer", "Thermometer", "Altimeter"],
+        "correct_answer_indexes": [0],
+        "explanation": "A barometer measures pressure, often used in weather forecasting.",
+        "difficulty": "medium",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "a1111111-1111-4111-8111-111111111206",
+        "category_id": "a1111111-1111-4111-8111-111111111111",
+        "prompt": "Which of these are programming languages?",
+        "answers": ["Python", "Ruby", "Photoshop"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "Python and Ruby are languages. Photoshop is design software.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "id": "b2222222-2222-4222-8222-222222222222",
+    "name": "Movies",
+    "description": "Blockbusters, characters, directors, and famous scenes.",
+    "created_at": "2026-03-29T16:00:00.000Z",
+    "updated_at": "2026-03-29T16:00:00.000Z",
+    "questions": [
+      {
+        "id": "b2222222-2222-4222-8222-222222222201",
+        "category_id": "b2222222-2222-4222-8222-222222222222",
+        "prompt": "Which movie features the quote \"I'll be back\"?",
+        "answers": ["The Terminator", "Die Hard", "Predator"],
+        "correct_answer_indexes": [0],
+        "explanation": "Arnold Schwarzenegger says it in The Terminator.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "b2222222-2222-4222-8222-222222222202",
+        "category_id": "b2222222-2222-4222-8222-222222222222",
+        "prompt": "Which two movies were directed by Christopher Nolan?",
+        "answers": ["Inception", "Interstellar", "Titanic"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "Titanic was directed by James Cameron.",
+        "difficulty": "medium",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "b2222222-2222-4222-8222-222222222203",
+        "category_id": "b2222222-2222-4222-8222-222222222222",
+        "prompt": "What is the name of the kingdom in Frozen?",
+        "answers": ["Arendelle", "Agrabah", "Atlantis"],
+        "correct_answer_indexes": [0],
+        "explanation": "Elsa and Anna rule over Arendelle.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "b2222222-2222-4222-8222-222222222204",
+        "category_id": "b2222222-2222-4222-8222-222222222222",
+        "prompt": "Which film won the Oscar for Best Picture at the 2020 ceremony?",
+        "answers": ["Parasite", "1917", "Joker"],
+        "correct_answer_indexes": [0],
+        "explanation": "Parasite made history as the first non-English language Best Picture winner.",
+        "difficulty": "hard",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "b2222222-2222-4222-8222-222222222205",
+        "category_id": "b2222222-2222-4222-8222-222222222222",
+        "prompt": "Which two characters are part of the Guardians of the Galaxy team?",
+        "answers": ["Gamora", "Groot", "Voldemort"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "Voldemort belongs to the Harry Potter series.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "b2222222-2222-4222-8222-222222222206",
+        "category_id": "b2222222-2222-4222-8222-222222222222",
+        "prompt": "Which animated film is about emotions inside a child's mind?",
+        "answers": ["Inside Out", "Soul", "Coco"],
+        "correct_answer_indexes": [0],
+        "explanation": "Pixar's Inside Out personifies emotions such as Joy and Sadness.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "id": "c3333333-3333-4333-8333-333333333333",
+    "name": "Gaming",
+    "description": "Consoles, franchises, studios, and game mechanics.",
+    "created_at": "2026-03-29T16:00:00.000Z",
+    "updated_at": "2026-03-29T16:00:00.000Z",
+    "questions": [
+      {
+        "id": "c3333333-3333-4333-8333-333333333201",
+        "category_id": "c3333333-3333-4333-8333-333333333333",
+        "prompt": "Which company created the Mario franchise?",
+        "answers": ["Nintendo", "Sega", "Capcom"],
+        "correct_answer_indexes": [0],
+        "explanation": "Mario has been Nintendo's mascot for decades.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "c3333333-3333-4333-8333-333333333202",
+        "category_id": "c3333333-3333-4333-8333-333333333333",
+        "prompt": "Which two games are battle royale titles?",
+        "answers": ["Fortnite", "Apex Legends", "Stardew Valley"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "Stardew Valley is a farming sim, not a battle royale.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "c3333333-3333-4333-8333-333333333203",
+        "category_id": "c3333333-3333-4333-8333-333333333333",
+        "prompt": "What color is the chaos emerald often associated with Sonic himself?",
+        "answers": ["Blue", "Green", "Red"],
+        "correct_answer_indexes": [1],
+        "explanation": "Green is the iconic choice among the classic Chaos Emeralds.",
+        "difficulty": "hard",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "c3333333-3333-4333-8333-333333333204",
+        "category_id": "c3333333-3333-4333-8333-333333333333",
+        "prompt": "Which franchise features the region of Hyrule?",
+        "answers": ["The Legend of Zelda", "Pokemon", "Metroid"],
+        "correct_answer_indexes": [0],
+        "explanation": "Hyrule is the recurring kingdom in Zelda games.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "c3333333-3333-4333-8333-333333333205",
+        "category_id": "c3333333-3333-4333-8333-333333333333",
+        "prompt": "Which two studios are first-party PlayStation studios?",
+        "answers": ["Naughty Dog", "Santa Monica Studio", "343 Industries"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "343 Industries is owned by Xbox.",
+        "difficulty": "medium",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "c3333333-3333-4333-8333-333333333206",
+        "category_id": "c3333333-3333-4333-8333-333333333333",
+        "prompt": "In Minecraft, which material is needed to craft a diamond pickaxe besides sticks?",
+        "answers": ["Diamonds", "Iron ingots", "Copper"],
+        "correct_answer_indexes": [0],
+        "explanation": "A diamond pickaxe uses 3 diamonds and 2 sticks.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "id": "d4444444-4444-4444-8444-444444444444",
+    "name": "Geography",
+    "description": "Countries, landmarks, capitals, and world maps.",
+    "created_at": "2026-03-29T16:00:00.000Z",
+    "updated_at": "2026-03-29T16:00:00.000Z",
+    "questions": [
+      {
+        "id": "d4444444-4444-4444-8444-444444444201",
+        "category_id": "d4444444-4444-4444-8444-444444444444",
+        "prompt": "What is the capital of Japan?",
+        "answers": ["Tokyo", "Kyoto", "Osaka"],
+        "correct_answer_indexes": [0],
+        "explanation": "Tokyo is Japan's capital and largest city.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "d4444444-4444-4444-8444-444444444202",
+        "category_id": "d4444444-4444-4444-8444-444444444444",
+        "prompt": "Which two countries share the Iberian Peninsula?",
+        "answers": ["Spain", "Portugal", "Italy"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "Italy is on the Italian Peninsula.",
+        "difficulty": "medium",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "d4444444-4444-4444-8444-444444444203",
+        "category_id": "d4444444-4444-4444-8444-444444444444",
+        "prompt": "Which river flows through Egypt?",
+        "answers": ["Nile", "Amazon", "Danube"],
+        "correct_answer_indexes": [0],
+        "explanation": "The Nile is central to Egyptian civilization.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "d4444444-4444-4444-8444-444444444204",
+        "category_id": "d4444444-4444-4444-8444-444444444444",
+        "prompt": "Which continent is the Sahara Desert located on?",
+        "answers": ["Africa", "Asia", "Australia"],
+        "correct_answer_indexes": [0],
+        "explanation": "The Sahara stretches across North Africa.",
+        "difficulty": "easy",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "d4444444-4444-4444-8444-444444444205",
+        "category_id": "d4444444-4444-4444-8444-444444444444",
+        "prompt": "Which two cities are national capitals?",
+        "answers": ["Canberra", "Ottawa", "Sydney"],
+        "correct_answer_indexes": [0, 1],
+        "explanation": "Sydney is Australia's largest city, but not the capital.",
+        "difficulty": "medium",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      },
+      {
+        "id": "d4444444-4444-4444-8444-444444444206",
+        "category_id": "d4444444-4444-4444-8444-444444444444",
+        "prompt": "Mount Kilimanjaro is located in which country?",
+        "answers": ["Tanzania", "Kenya", "Uganda"],
+        "correct_answer_indexes": [0],
+        "explanation": "Kilimanjaro is in northeastern Tanzania.",
+        "difficulty": "medium",
+        "created_at": "2026-03-29T16:00:00.000Z",
+        "updated_at": "2026-03-29T16:00:00.000Z"
+      }
+    ]
+  }
+]

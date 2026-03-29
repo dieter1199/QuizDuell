@@ -1,19 +1,9 @@
-import type { Database } from "@/types/database";
-
-export type CategoryRow = Database["public"]["Tables"]["categories"]["Row"];
-export type QuestionRow = Database["public"]["Tables"]["questions"]["Row"];
-export type RoomRow = Database["public"]["Tables"]["rooms"]["Row"];
-export type RoomPlayerRow = Database["public"]["Tables"]["room_players"]["Row"];
-export type GameSessionRow = Database["public"]["Tables"]["game_sessions"]["Row"];
-export type GameRoundRow = Database["public"]["Tables"]["game_rounds"]["Row"];
-export type PlayerAnswerRow = Database["public"]["Tables"]["player_answers"]["Row"];
-
-export type QuestionDifficulty = QuestionRow["difficulty"];
-export type RoomStatus = RoomRow["status"];
-export type PlayerStatus = RoomPlayerRow["status"];
-export type PlayerConnectionStatus = RoomPlayerRow["connection_status"];
-export type GamePhase = GameSessionRow["phase"];
-export type GameStatus = GameSessionRow["status"];
+export type QuestionDifficulty = "easy" | "medium" | "hard";
+export type RoomStatus = "lobby" | "active" | "closed";
+export type PlayerStatus = "active" | "left" | "kicked";
+export type PlayerConnectionStatus = "online" | "offline";
+export type GamePhase = "question" | "reveal" | "finished";
+export type GameStatus = "active" | "finished" | "cancelled";
 
 export type RoomSettings = {
   questionCount: number;
@@ -25,20 +15,86 @@ export type RoomSettings = {
   showExplanations: boolean;
 };
 
-export type QuestionRecord = Omit<QuestionRow, "answers" | "correct_answer_indexes"> & {
+export type CategoryRecord = {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QuestionRecord = {
+  id: string;
+  category_id: string;
+  prompt: string;
   answers: string[];
   correct_answer_indexes: number[];
+  explanation: string | null;
+  difficulty: QuestionDifficulty;
+  created_at: string;
+  updated_at: string;
 };
 
-export type RoomRecord = Omit<RoomRow, "settings"> & {
+export type RoomRecord = {
+  id: string;
+  code: string;
+  status: RoomStatus;
   settings: RoomSettings;
+  host_player_id: string | null;
+  current_game_id: string | null;
+  closed_reason: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
-export type GameSessionRecord = Omit<GameSessionRow, "settings"> & {
+export type RoomPlayerRow = {
+  id: string;
+  room_id: string;
+  player_token: string;
+  display_name: string;
+  is_host: boolean;
+  status: PlayerStatus;
+  connection_status: PlayerConnectionStatus;
+  joined_at: string;
+  last_seen_at: string;
+  left_at: string | null;
+};
+
+export type GameSessionRecord = {
+  id: string;
+  room_id: string;
+  status: GameStatus;
+  phase: GamePhase;
+  current_round_number: number;
+  total_rounds: number;
   settings: RoomSettings;
+  phase_started_at: string;
+  phase_ends_at: string;
+  started_at: string;
+  ended_at: string | null;
 };
 
-export type CategoryWithQuestions = CategoryRow & {
+export type GameRoundRow = {
+  id: string;
+  game_session_id: string;
+  question_id: string;
+  round_number: number;
+  answer_order: number[];
+  created_at: string;
+};
+
+export type PlayerAnswerRow = {
+  id: string;
+  round_id: string;
+  player_id: string;
+  selected_indexes: number[];
+  is_correct: boolean;
+  timed_out: boolean;
+  points_awarded: number;
+  submitted_at: string;
+};
+
+export type CategoryWithQuestions = CategoryRecord & {
   questions: QuestionRecord[];
 };
 

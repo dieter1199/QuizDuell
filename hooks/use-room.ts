@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
-import { HEARTBEAT_INTERVAL_MS } from "@/lib/constants";
+import { HEARTBEAT_INTERVAL_MS, ROOM_SYNC_INTERVAL_MS } from "@/lib/constants";
 import { requestJson } from "@/lib/fetcher";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { PlayerProfile, RoomSnapshot } from "@/types/app";
 
 type SnapshotResponse = {
@@ -88,36 +87,14 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
       return;
     }
 
-    const supabase = getSupabaseBrowserClient();
-    const channel = supabase
-      .channel(`room-${code}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "rooms" }, () => {
-        void refreshSnapshot();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "room_players" }, () => {
-        void refreshSnapshot();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "game_sessions" }, () => {
-        void refreshSnapshot();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "game_rounds" }, () => {
-        void refreshSnapshot();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "player_answers" }, () => {
-        void refreshSnapshot();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () => {
-        void refreshSnapshot();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "questions" }, () => {
-        void refreshSnapshot();
-      })
-      .subscribe();
+    const interval = window.setInterval(() => {
+      void refreshSnapshot();
+    }, ROOM_SYNC_INTERVAL_MS);
 
     return () => {
-      void supabase.removeChannel(channel);
+      window.clearInterval(interval);
     };
-  }, [code, refreshSnapshot, snapshot?.room.id]);
+  }, [refreshSnapshot, snapshot?.room.id]);
 
   useEffect(() => {
     if (!snapshot?.me || snapshot.me.status !== "active") {

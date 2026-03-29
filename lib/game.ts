@@ -1,17 +1,11 @@
 import { DEFAULT_ROOM_SETTINGS, ROOM_REVEAL_DURATION_SECONDS } from "@/lib/constants";
 import { arraysEqual, sortNumberArray } from "@/lib/utils";
 import type { QuestionRecord, RoomSettings, RoundAnswerOption } from "@/types/app";
-import type { Json } from "@/types/database";
 
-export function parseQuestionAnswers(value: Json) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
-
-export function normalizeRoomSettings(value: Json, fallbackCategoryIds: string[] = []): RoomSettings {
+export function normalizeRoomSettings(
+  value: Partial<RoomSettings> | unknown,
+  fallbackCategoryIds: string[] = [],
+): RoomSettings {
   const base: RoomSettings = {
     ...DEFAULT_ROOM_SETTINGS,
     selectedCategoryIds: fallbackCategoryIds.length ? fallbackCategoryIds : [],

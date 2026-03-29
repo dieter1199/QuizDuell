@@ -1,178 +1,250 @@
-import type { Database } from "@/types/database";
-import type { CategoryInput, CategoryWithQuestions, QuestionInput, QuestionRecord } from "@/types/app";
+import "server-only";
+
+import { promises as fs } from "node:fs";
+import path from "node:path";
 
 import { ApiError } from "@/lib/server/api";
-import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { parseQuestionAnswers } from "@/lib/game";
+import type { CategoryInput, CategoryWithQuestions, QuestionInput, QuestionRecord } from "@/types/app";
 
-type CategoryInsert = Database["public"]["Tables"]["categories"]["Insert"];
-type CategoryUpdate = Database["public"]["Tables"]["categories"]["Update"];
-type QuestionInsert = Database["public"]["Tables"]["questions"]["Insert"];
-type QuestionUpdate = Database["public"]["Tables"]["questions"]["Update"];
+const QUESTION_BANK_PATH = path.join(process.cwd(), "data", "question-bank.json");
 
-function assertContentError(message: string, error: { code?: string; message: string } | null) {
-  if (!error) {
-    return;
-  }
+let writeQueue: Promise<void> = Promise.resolve();
 
-  if (error.code === "23505") {
-    throw new ApiError(409, error.message);
-  }
-
-  throw new ApiError(500, message);
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function toQuestionRecord(row: Database["public"]["Tables"]["questions"]["Row"]): QuestionRecord {
+async function readQuestionBankFile() {
+  const raw = await fs.readFile(QUESTION_BANK_PATH, "utf8");
+  return JSON.parse(raw) as CategoryWithQuestions[];
+}
+
+async function writeQuestionBankFile(categories: CategoryWithQuestions[]) {
+  writeQueue = writeQueue.then(async () => {
+    await fs.writeFile(QUESTION_BANK_PATH, `${JSON.stringify(categories, null, 2)}\n`, "utf8");
+  });
+
+  await writeQueue;
+}
+
+function cloneCategoryBank(categories: CategoryWithQuestions[]) {
+  return structuredClone(categories);
+}
+
+function ensureUniqueCategoryName(
+  categories: CategoryWithQuestions[],
+  name: string,
+  excludedCategoryId?: string,
+) {
+  const normalized = name.toLowerCase();
+  const exists = categories.some(
+    (category) => category.id !== excludedCategoryId && category.name.toLowerCase() === normalized,
+  );
+
+  if (exists) {
+    throw new ApiError(409, "A category with that name already exists.");
+  }
+}
+
+function ensureUniqueQuestionPrompt(
+  category: CategoryWithQuestions,
+  prompt: string,
+  excludedQuestionId?: string,
+) {
+  const normalized = prompt.toLowerCase();
+  const exists = category.questions.some(
+    (question) => question.id !== excludedQuestionId && question.prompt.toLowerCase() === normalized,
+  );
+
+  if (exists) {
+    throw new ApiError(409, "A question with that prompt already exists in this category.");
+  }
+}
+
+function createQuestionRecord(input: QuestionInput): QuestionRecord {
+  const timestamp = nowIso();
+
   return {
-    ...row,
-    answers: parseQuestionAnswers(row.answers),
-    correct_answer_indexes: row.correct_answer_indexes ?? [],
+    id: crypto.randomUUID(),
+    category_id: input.categoryId,
+    prompt: input.prompt,
+    answers: input.answers,
+    correct_answer_indexes: input.correctAnswerIndexes,
+    explanation: input.explanation?.trim() ? input.explanation.trim() : null,
+    difficulty: input.difficulty,
+    created_at: timestamp,
+    updated_at: timestamp,
   };
 }
 
 export async function getCategoryBank() {
-  const admin = getSupabaseAdminClient();
-  const [categoriesResponse, questionsResponse] = await Promise.all([
-    admin.from("categories").select("*").order("name", { ascending: true }),
-    admin.from("questions").select("*").order("created_at", { ascending: true }),
-  ]);
-
-  assertContentError("Unable to load categories.", categoriesResponse.error);
-  assertContentError("Unable to load questions.", questionsResponse.error);
-
-  const categories = (categoriesResponse.data ?? []) as Database["public"]["Tables"]["categories"]["Row"][];
-  const questions = (questionsResponse.data ?? []) as Database["public"]["Tables"]["questions"]["Row"][];
-  const questionsByCategory = new Map<string, QuestionRecord[]>();
-
-  for (const question of questions) {
-    const bucket = questionsByCategory.get(question.category_id) ?? [];
-    bucket.push(toQuestionRecord(question));
-    questionsByCategory.set(question.category_id, bucket);
-  }
-
-  return categories.map((category) => ({
-    ...category,
-    questions: questionsByCategory.get(category.id) ?? [],
-  })) satisfies CategoryWithQuestions[];
+  const categories = await readQuestionBankFile();
+  return cloneCategoryBank(categories);
 }
 
 export async function createCategory(input: CategoryInput) {
-  const admin = getSupabaseAdminClient();
-  const insert: CategoryInsert = {
+  const categories = await readQuestionBankFile();
+  ensureUniqueCategoryName(categories, input.name);
+
+  const timestamp = nowIso();
+
+  categories.push({
+    id: crypto.randomUUID(),
     name: input.name,
     description: input.description,
-  };
+    created_at: timestamp,
+    updated_at: timestamp,
+    questions: [],
+  });
 
-  const { error } = await admin.from("categories").insert(insert as never);
-  assertContentError("Unable to create the category.", error);
-
-  return getCategoryBank();
+  await writeQuestionBankFile(categories);
+  return cloneCategoryBank(categories);
 }
 
 export async function updateCategory(id: string, input: CategoryInput) {
-  const admin = getSupabaseAdminClient();
-  const update: CategoryUpdate = {
-    name: input.name,
-    description: input.description,
-  };
+  const categories = await readQuestionBankFile();
+  const category = categories.find((entry) => entry.id === id);
 
-  const { error } = await admin.from("categories").update(update as never).eq("id", id);
-  assertContentError("Unable to update the category.", error);
+  if (!category) {
+    throw new ApiError(404, "Category not found.");
+  }
 
-  return getCategoryBank();
+  ensureUniqueCategoryName(categories, input.name, id);
+
+  category.name = input.name;
+  category.description = input.description;
+  category.updated_at = nowIso();
+
+  await writeQuestionBankFile(categories);
+  return cloneCategoryBank(categories);
 }
 
 export async function deleteCategory(id: string) {
-  const admin = getSupabaseAdminClient();
-  const { error } = await admin.from("categories").delete().eq("id", id);
-  assertContentError("Unable to delete the category.", error);
+  const categories = await readQuestionBankFile();
+  const nextCategories = categories.filter((category) => category.id !== id);
 
-  return getCategoryBank();
+  if (nextCategories.length === categories.length) {
+    throw new ApiError(404, "Category not found.");
+  }
+
+  await writeQuestionBankFile(nextCategories);
+  return cloneCategoryBank(nextCategories);
 }
 
 export async function createQuestion(input: QuestionInput) {
-  const admin = getSupabaseAdminClient();
-  const insert: QuestionInsert = {
-    category_id: input.categoryId,
-    prompt: input.prompt,
-    answers: input.answers,
-    correct_answer_indexes: input.correctAnswerIndexes,
-    explanation: input.explanation?.trim() ? input.explanation.trim() : null,
-    difficulty: input.difficulty,
-  };
+  const categories = await readQuestionBankFile();
+  const category = categories.find((entry) => entry.id === input.categoryId);
 
-  const { error } = await admin.from("questions").insert(insert as never);
-  assertContentError("Unable to create the question.", error);
+  if (!category) {
+    throw new ApiError(404, "Category not found.");
+  }
 
-  return getCategoryBank();
+  ensureUniqueQuestionPrompt(category, input.prompt);
+  category.questions.push(createQuestionRecord(input));
+  category.updated_at = nowIso();
+
+  await writeQuestionBankFile(categories);
+  return cloneCategoryBank(categories);
 }
 
 export async function updateQuestion(id: string, input: QuestionInput) {
-  const admin = getSupabaseAdminClient();
-  const update: QuestionUpdate = {
+  const categories = await readQuestionBankFile();
+  const currentCategory = categories.find((category) =>
+    category.questions.some((question) => question.id === id),
+  );
+  const targetCategory = categories.find((category) => category.id === input.categoryId);
+
+  if (!currentCategory || !targetCategory) {
+    throw new ApiError(404, "Question or category not found.");
+  }
+
+  const questionIndex = currentCategory.questions.findIndex((question) => question.id === id);
+  const existingQuestion = currentCategory.questions[questionIndex];
+
+  ensureUniqueQuestionPrompt(targetCategory, input.prompt, id);
+
+  const updatedQuestion: QuestionRecord = {
+    ...existingQuestion,
     category_id: input.categoryId,
     prompt: input.prompt,
     answers: input.answers,
     correct_answer_indexes: input.correctAnswerIndexes,
     explanation: input.explanation?.trim() ? input.explanation.trim() : null,
     difficulty: input.difficulty,
+    updated_at: nowIso(),
   };
 
-  const { error } = await admin.from("questions").update(update as never).eq("id", id);
-  assertContentError("Unable to update the question.", error);
+  currentCategory.questions.splice(questionIndex, 1);
 
-  return getCategoryBank();
+  if (currentCategory.id === targetCategory.id) {
+    currentCategory.questions.push(updatedQuestion);
+    currentCategory.updated_at = nowIso();
+  } else {
+    currentCategory.updated_at = nowIso();
+    targetCategory.questions.push(updatedQuestion);
+    targetCategory.updated_at = nowIso();
+  }
+
+  await writeQuestionBankFile(categories);
+  return cloneCategoryBank(categories);
 }
 
 export async function deleteQuestion(id: string) {
-  const admin = getSupabaseAdminClient();
-  const { error } = await admin.from("questions").delete().eq("id", id);
-  assertContentError("Unable to delete the question.", error);
+  const categories = await readQuestionBankFile();
+  let removed = false;
 
-  return getCategoryBank();
-}
+  for (const category of categories) {
+    const nextQuestions = category.questions.filter((question) => question.id !== id);
 
-export async function duplicateQuestion(id: string) {
-  const admin = getSupabaseAdminClient();
-  const { data, error } = await admin.from("questions").select("*").eq("id", id).maybeSingle();
-  assertContentError("Unable to duplicate the question.", error);
-  const question = data as Database["public"]["Tables"]["questions"]["Row"] | null;
+    if (nextQuestions.length !== category.questions.length) {
+      category.questions = nextQuestions;
+      category.updated_at = nowIso();
+      removed = true;
+      break;
+    }
+  }
 
-  if (!question) {
+  if (!removed) {
     throw new ApiError(404, "Question not found.");
   }
 
-  let prompt = `${question.prompt} (Copy)`;
+  await writeQuestionBankFile(categories);
+  return cloneCategoryBank(categories);
+}
+
+export async function duplicateQuestion(id: string) {
+  const categories = await readQuestionBankFile();
+  const category = categories.find((entry) => entry.questions.some((question) => question.id === id));
+
+  if (!category) {
+    throw new ApiError(404, "Question not found.");
+  }
+
+  const original = category.questions.find((question) => question.id === id);
+
+  if (!original) {
+    throw new ApiError(404, "Question not found.");
+  }
+
+  let prompt = `${original.prompt} (Copy)`;
   let suffix = 2;
 
-  while (true) {
-    const existing = await admin
-      .from("questions")
-      .select("id")
-      .eq("category_id", question.category_id)
-      .eq("prompt", prompt)
-      .maybeSingle();
-
-    assertContentError("Unable to duplicate the question.", existing.error);
-
-    if (!existing.data) {
-      break;
-    }
-
-    prompt = `${question.prompt} (Copy ${suffix})`;
+  while (category.questions.some((question) => question.prompt.toLowerCase() === prompt.toLowerCase())) {
+    prompt = `${original.prompt} (Copy ${suffix})`;
     suffix += 1;
   }
 
-  const { error: insertError } = await admin.from("questions").insert({
-    category_id: question.category_id,
+  const timestamp = nowIso();
+
+  category.questions.push({
+    ...structuredClone(original),
+    id: crypto.randomUUID(),
     prompt,
-    answers: question.answers,
-    correct_answer_indexes: question.correct_answer_indexes,
-    explanation: question.explanation,
-    difficulty: question.difficulty,
-  } as never);
+    created_at: timestamp,
+    updated_at: timestamp,
+  });
+  category.updated_at = timestamp;
 
-  assertContentError("Unable to duplicate the question.", insertError);
-
-  return getCategoryBank();
+  await writeQuestionBankFile(categories);
+  return cloneCategoryBank(categories);
 }

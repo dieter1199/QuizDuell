@@ -1,25 +1,30 @@
 # QuizDuell Live
 
-Realtime multiplayer quiz duel MVP built with Next.js App Router, Tailwind CSS, and Supabase.
+Realtime multiplayer quiz duel MVP built with Next.js App Router and Tailwind CSS.
+
+## Architecture
+
+This version is intentionally local-only and does not use any database provider.
+
+- Categories and questions are stored in [`data/question-bank.json`](/c:/Users/Dieter%20Holstein/OneDrive/Desktop/QuizDuel/QuizDuell/data/question-bank.json)
+- Active rooms, players, rounds, and scores are stored in the Next.js server process memory
+- Browser clients stay in sync by polling the room APIs
+
+Important limitation:
+
+- If you restart the dev server, all active rooms and ongoing games are lost
+- The question bank persists because it is saved in the repo file
 
 ## Features
 
-- Local display-name onboarding stored in `localStorage`
+- Display-name onboarding stored in `localStorage`
 - Host/join flow with 6-character room codes
-- Live lobby with host badge, kick controls, room link, and copy actions
-- Category and question management with validation
-- Configurable duel settings:
-  - question count
-  - timer length
-  - points per question
-  - selected categories
-  - randomized question order
-  - randomized answer order
-  - explanations on reveal
-- Realtime synced gameplay using Supabase Realtime subscriptions
-- Auto reveal on timeout or when all players answer
-- Live leaderboard and replay flow
-- Demo seed data for:
+- Lobby with live player list, host badge, kick controls, room code, and share link
+- Category and question CRUD with validation
+- Configurable game settings
+- Synced multiplayer gameplay with timed reveal phases
+- Leaderboard and replay flow
+- Demo categories:
   - General Knowledge
   - Movies
   - Gaming
@@ -29,9 +34,9 @@ Realtime multiplayer quiz duel MVP built with Next.js App Router, Tailwind CSS, 
 
 ```text
 app/
-  api/                  Next route handlers for rooms, games, categories, questions
+  api/                  Route handlers for rooms, games, categories, questions
   categories/           Standalone question-bank page
-  room/[code]/          Realtime room page
+  room/[code]/          Multiplayer room page
 components/
   ui/                   Reusable UI primitives
   home-page.tsx         Landing page and entry flow
@@ -39,40 +44,21 @@ components/
   category-manager.tsx  CRUD editor for categories/questions
 hooks/
   use-profile.ts        Local profile persistence
-  use-room.ts           Room join, subscriptions, heartbeat, syncing
-  use-category-bank.ts  Question-bank data loader
+  use-room.ts           Room join, polling, heartbeat, syncing
+  use-category-bank.ts  Question-bank loader
 lib/
-  server/               Supabase-backed room/game/content services
-  supabase/             Browser + server Supabase clients
+  server/               Local file-backed content service and in-memory room engine
   validation.ts         Zod schemas
   game.ts               Game helpers and scoring logic
-supabase/
-  schema.sql            Database schema + realtime publication
-  seed.sql              Demo categories and questions
+data/
+  question-bank.json    Persistent categories and questions
 types/
   app.ts                Shared app-level types
-  database.ts           Supabase database shape
 ```
 
-## Supabase Setup
-
-1. Create a new Supabase project.
-2. Copy `.env.example` to `.env.local`.
-3. Fill in:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-4. Open the Supabase SQL Editor and run:
-   - [`supabase/schema.sql`](/c:/Users/Dieter%20Holstein/OneDrive/Desktop/QuizDuel/QuizDuell/supabase/schema.sql)
-   - [`supabase/seed.sql`](/c:/Users/Dieter%20Holstein/OneDrive/Desktop/QuizDuel/QuizDuell/supabase/seed.sql)
-
-Notes:
-
-- The MVP uses the service role key on the Next.js server for mutations.
-- Tables are added to the `supabase_realtime` publication in `schema.sql`.
-- RLS is disabled in this MVP to keep the no-auth flow simple. That is fine for local development and demo use, but should be redesigned for production.
-
 ## Local Development
+
+No environment variables are required.
 
 ```bash
 npm install
@@ -87,17 +73,21 @@ Open `http://localhost:3000`.
 2. Host a room.
 3. Open a second tab or an incognito window.
 4. Enter another display name.
-5. Join the room with the code or copied link.
+5. Join with the room code or copied room link.
 6. Start the duel and answer in both windows.
 
-## Validation Rules
+## Editing Questions Directly
 
-- Every question must have exactly 3 answers.
-- Each question must have 1 or 2 correct answers.
-- Empty fields are rejected.
-- Rooms require at least 2 active players to start.
-- Starting fails if there are not enough questions in the selected categories.
-- Duplicate display names in the same room are auto-numbered.
+You can edit quiz content in two ways:
+
+1. In the app through the category/question manager.
+2. Directly in [`data/question-bank.json`](/c:/Users/Dieter%20Holstein/OneDrive/Desktop/QuizDuel/QuizDuell/data/question-bank.json).
+
+Each category stores its own nested questions. Keep these rules intact when editing manually:
+
+- Every question must have exactly 3 answers
+- Every question must have 1 or 2 correct answer indexes
+- `category_id` must match the parent category `id`
 
 ## Verification
 
@@ -110,9 +100,8 @@ npm run build
 
 ## What To Improve Later
 
-- Real authentication and secure RLS policies
-- Presence/broadcast channels instead of open table subscriptions
-- Better host transfer rules
-- Richer analytics and match history
-- Image/media support for questions
-- Dedicated mobile gestures and audio feedback
+- Durable room persistence across server restarts
+- WebSocket or SSE sync instead of polling
+- Host transfer when the host leaves
+- Match history and analytics
+- Media-rich questions
