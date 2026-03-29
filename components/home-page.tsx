@@ -90,10 +90,10 @@ export function HomePage() {
             <div className="relative">
               <Badge tone="warm">Fast rooms. Live leaderboard. Shared lobby.</Badge>
               <h2 className="mt-5 max-w-2xl text-3xl font-semibold leading-tight md:text-5xl">
-                Der Angelschein macht sich nicht von alleine!
+                Der Angelschein macht sich nicht von alleine! Also zeig was du kannst.
               </h2>
               <p className="mt-4 max-w-2xl text-base text-slate-300 md:text-lg">
-                Erstell einen Raum, share den code, pick Kategorien, und beweise deine Kenntnisse.
+                Erstell einen Raum, share den code, pick Kategorien, und beweise deine Kenntnisse im ultimativen Angelschein-Duell.
               </p>
 
               <div className="mt-8 grid gap-4 md:grid-cols-3">
