@@ -147,36 +147,36 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
     };
   }, [applySnapshot, profile?.playerToken, snapshot?.game]);
 
-  const roomActions = {
-    refresh: refreshSnapshot,
-    updateSnapshot: applySnapshot,
-    createRoom: async () => {
-      if (!profile) {
-        throw new Error("Profile missing.");
-      }
+  const createRoom = useCallback(async () => {
+    if (!profile) {
+      throw new Error("Profile missing.");
+    }
 
-      return requestJson<RoomCodeResponse>("/api/rooms", {
-        method: "POST",
-        body: {
-          displayName: profile.displayName,
-          playerToken: profile.playerToken,
-        },
-      });
-    },
-    leaveRoom: async () => {
-      if (!snapshot?.me) {
-        return;
-      }
+    return requestJson<RoomCodeResponse>("/api/rooms", {
+      method: "POST",
+      body: {
+        displayName: profile.displayName,
+        playerToken: profile.playerToken,
+      },
+    });
+  }, [profile]);
 
-      await requestJson<{ ok: boolean }>(`${roomPath}/actions`, {
-        method: "POST",
-        body: {
-          action: "leave",
-          playerToken: snapshot.me.player_token,
-        },
-      });
-    },
-    roomAction: async (body: Record<string, unknown>) => {
+  const leaveRoom = useCallback(async () => {
+    if (!snapshot?.me) {
+      return;
+    }
+
+    await requestJson<{ ok: boolean }>(`${roomPath}/actions`, {
+      method: "POST",
+      body: {
+        action: "leave",
+        playerToken: snapshot.me.player_token,
+      },
+    });
+  }, [roomPath, snapshot?.me]);
+
+  const roomAction = useCallback(
+    async (body: Record<string, unknown>) => {
       const payload = await requestJson<SnapshotResponse>(`${roomPath}/actions`, {
         method: "POST",
         body,
@@ -188,7 +188,11 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
 
       return payload.snapshot;
     },
-    gameAction: async (body: Record<string, unknown>) => {
+    [applySnapshot, roomPath],
+  );
+
+  const gameAction = useCallback(
+    async (body: Record<string, unknown>) => {
       if (!snapshot?.game) {
         throw new Error("No active game.");
       }
@@ -207,13 +211,33 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
 
       return payload.snapshot;
     },
-  };
+    [applySnapshot, snapshot?.game],
+  );
 
-  return {
-    snapshot,
-    loading,
-    busy: isPending,
-    error,
-    ...roomActions,
-  };
+  return useMemo(
+    () => ({
+      snapshot,
+      loading,
+      busy: isPending,
+      error,
+      refresh: refreshSnapshot,
+      updateSnapshot: applySnapshot,
+      createRoom,
+      leaveRoom,
+      roomAction,
+      gameAction,
+    }),
+    [
+      applySnapshot,
+      createRoom,
+      error,
+      gameAction,
+      isPending,
+      leaveRoom,
+      loading,
+      refreshSnapshot,
+      roomAction,
+      snapshot,
+    ],
+  );
 }

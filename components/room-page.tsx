@@ -42,16 +42,8 @@ type RoomPageProps = {
   code: string;
 };
 
-function formatLockedByText(displayNames: string[]) {
-  if (displayNames.length === 1) {
-    return `${displayNames[0]} locked in`;
-  }
-
-  if (displayNames.length === 2) {
-    return `${displayNames[0]} + ${displayNames[1]}`;
-  }
-
-  return `${displayNames[0]}, ${displayNames[1]} +${displayNames.length - 2}`;
+function formatLockStatusText(displayName: string, isCurrentPlayer: boolean) {
+  return isCurrentPlayer ? "You locked in" : `${displayName} locked in`;
 }
 
 function AnswerChip({
@@ -100,6 +92,8 @@ export function RoomPage({ code }: RoomPageProps) {
   const seenSubmissionIdsRef = useRef<Set<string>>(new Set());
 
   const room = useRoom(code, profile && hasDisplayName ? profile : null);
+  const gameAction = room.gameAction;
+  const playLockSound = sounds.playLockSound;
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -139,28 +133,19 @@ export function RoomPage({ code }: RoomPageProps) {
     room.snapshot?.me &&
       currentRound?.submissions.some((submission) => submission.player_id === room.snapshot?.me?.id),
   );
-  const answerLocks = useMemo(() => {
-    const locks = new Map<number, string[]>();
-
+  const myPlayerToken = room.snapshot?.me?.player_token ?? null;
+  const lockedPlayers = useMemo(() => {
     if (!currentRound || game?.session.phase !== "question") {
-      return locks;
+      return [];
     }
 
-    for (const submission of currentRound.submissions) {
-      if (submission.timed_out) {
-        continue;
-      }
-
-      for (const selectedIndex of submission.selected_indexes) {
-        const currentLocks = locks.get(selectedIndex) ?? [];
-        currentLocks.push(submission.displayName);
-        locks.set(selectedIndex, currentLocks);
-      }
-    }
-
-    return locks;
+    return currentRound.submissions.filter((submission) => !submission.timed_out);
   }, [currentRound, game?.session.phase]);
   const roomLink = typeof window !== "undefined" ? `${window.location.origin}/room/${code}` : "";
+  const activeGameId = game?.session.id ?? null;
+  const activePhase = game?.session.phase ?? null;
+  const activePhaseEndsAt = game?.session.phase_ends_at ?? null;
+  const currentRoundId = currentRound?.round.id ?? null;
   const phaseMsRemaining = game ? Math.max(0, new Date(game.session.phase_ends_at).getTime() - now) : 0;
   const phaseSecondsRemaining = formatCountdown(phaseMsRemaining);
   const phaseProgress = game
@@ -247,8 +232,17 @@ export function RoomPage({ code }: RoomPageProps) {
   };
 
   const handleSaveSettings = async () => {
+    await persistSettingsDraft(true);
+  };
+
+  const updateCategoryBank = async (request: Promise<CategoryBankResponse>) => {
+    await request;
+    await room.refresh();
+  };
+
+  const persistSettingsDraft = async (showSuccessMessage: boolean) => {
     if (!room.snapshot?.me || !settingsDraft) {
-      return;
+      return null;
     }
 
     const parsed = roomSettingsSchema.safeParse({
@@ -260,7 +254,11 @@ export function RoomPage({ code }: RoomPageProps) {
 
     if (!parsed.success) {
       setStatusMessage(parsed.error.issues[0]?.message ?? "Unable to save settings.");
-      return;
+      return null;
+    }
+
+    if (!isSettingsDraftDirty) {
+      return parsed.data;
     }
 
     try {
@@ -271,16 +269,62 @@ export function RoomPage({ code }: RoomPageProps) {
       });
       setSettingsDraft(parsed.data);
       setIsSettingsDraftDirty(false);
-      setStatusMessage("Game settings updated.");
+
+      if (showSuccessMessage) {
+        setStatusMessage("Game settings updated.");
+      }
+
+      return parsed.data;
     } catch (saveError) {
       setStatusMessage(saveError instanceof Error ? saveError.message : "Unable to save settings.");
+      return null;
     }
   };
 
-  const updateCategoryBank = async (request: Promise<CategoryBankResponse>) => {
-    await request;
-    await room.refresh();
-  };
+  useEffect(() => {
+    if (
+      !activeGameId ||
+      !currentRoundId ||
+      activePhase !== "question" ||
+      !activePhaseEndsAt ||
+      hasSubmitted ||
+      selectedIndexes.length === 0 ||
+      !myPlayerToken
+    ) {
+      return;
+    }
+
+    // Submit a fraction before expiry so the selection reaches the server
+    // before the round advances.
+    const msUntilAutoLock = new Date(activePhaseEndsAt).getTime() - Date.now() - 80;
+
+    const timeout = window.setTimeout(() => {
+      void gameAction({
+        action: "submitAnswer",
+        playerToken: myPlayerToken,
+        selectedIndexes: [...selectedIndexes],
+      })
+        .then(() => {
+          playLockSound();
+          setStatusMessage("Answer auto-locked.");
+        })
+        .catch(() => {});
+    }, Math.max(0, msUntilAutoLock));
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [
+    activeGameId,
+    activePhase,
+    activePhaseEndsAt,
+    currentRoundId,
+    gameAction,
+    hasSubmitted,
+    myPlayerToken,
+    playLockSound,
+    selectedIndexes,
+  ]);
 
   if (!ready || room.loading) {
     return (
@@ -398,7 +442,7 @@ export function RoomPage({ code }: RoomPageProps) {
                       Leave
                     </Button>
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-start">
                     <div>
                       <div className="flex items-center gap-2">
                         <Badge tone={game.session.phase === "question" ? "warm" : "cool"}>
@@ -412,9 +456,9 @@ export function RoomPage({ code }: RoomPageProps) {
                         {currentRound?.question.prompt}
                       </h2>
                     </div>
-                    <div className="min-w-24 text-right md:min-w-40">
+                    <div className="w-full max-w-[9rem] rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-left md:min-w-32 md:justify-self-end md:text-right">
                       <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Timer</p>
-                      <p className="mt-2 text-3xl font-semibold md:text-4xl">{phaseSecondsRemaining}</p>
+                      <p className="mt-1 text-3xl font-semibold md:text-4xl">{phaseSecondsRemaining}</p>
                     </div>
                   </div>
 
@@ -425,11 +469,29 @@ export function RoomPage({ code }: RoomPageProps) {
                     />
                   </div>
 
+                  {lockedPlayers.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {lockedPlayers.map((submission) => (
+                        <div
+                          key={submission.id}
+                          className="inline-flex max-w-full items-center gap-2 rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-1 text-xs font-medium text-sky-50"
+                        >
+                          <span className="size-2 rounded-full bg-sky-200" />
+                          <span className="truncate">
+                            {formatLockStatusText(
+                              submission.displayName,
+                              submission.player_id === room.snapshot?.me?.id,
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
                   <div className="grid gap-3">
                     {currentRound?.answers.map((answer) => {
                       const selected = selectedIndexes.includes(answer.displayIndex);
                       const revealed = game.session.phase !== "question";
-                      const lockedBy = answerLocks.get(answer.displayIndex) ?? [];
                       return (
                         <AnswerChip
                           key={`${currentRound.round.id}-${answer.displayIndex}`}
@@ -438,19 +500,11 @@ export function RoomPage({ code }: RoomPageProps) {
                           correct={revealed ? answer.isCorrect : false}
                           onClick={() => handleToggleAnswer(answer.displayIndex)}
                         >
-                          <div className="space-y-3">
-                            {lockedBy.length ? (
-                              <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-amber-300/25 bg-amber-400/12 px-3 py-1 text-xs font-medium text-amber-50">
-                                <span className="size-2 rounded-full bg-amber-200" />
-                                <span className="truncate">{formatLockedByText(lockedBy)}</span>
-                              </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span>{answer.text}</span>
+                            {game.session.phase !== "question" && answer.isCorrect ? (
+                              <CheckCircle2 className="size-5 text-emerald-200" />
                             ) : null}
-                            <div className="flex items-center justify-between gap-4">
-                              <span>{answer.text}</span>
-                              {game.session.phase !== "question" && answer.isCorrect ? (
-                                <CheckCircle2 className="size-5 text-emerald-200" />
-                              ) : null}
-                            </div>
                           </div>
                         </AnswerChip>
                       );
@@ -460,7 +514,7 @@ export function RoomPage({ code }: RoomPageProps) {
                   {game.session.phase === "question" ? (
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <div className="text-sm text-slate-300">
-                        Choose 1 or 2 answers. Full matches only score points.
+                        Choose 1 or 2 answers. Full matches only score points, and selected answers auto-lock at 0.
                       </div>
                       <Button
                         disabled={selectedIndexes.length === 0 || hasSubmitted}
@@ -689,6 +743,12 @@ export function RoomPage({ code }: RoomPageProps) {
                               }
 
                               try {
+                                const syncedSettings = await persistSettingsDraft(false);
+
+                                if (settingsDraft && !syncedSettings) {
+                                  return;
+                                }
+
                                 await room.roomAction({
                                   action: "startGame",
                                   actorToken: room.snapshot.me.player_token,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 type SoundStep = {
   frequency: number;
@@ -111,9 +111,24 @@ export function useQuizSounds() {
     [getAudioContext],
   );
 
-  return {
-    playSelectSound: () => playCue(SELECT_CUE),
-    playLockSound: () => playCue(LOCK_CUE),
-    playOtherLockSound: () => playCue(REMOTE_LOCK_CUE),
-  };
+  const playSelectSound = useCallback(() => {
+    playCue(SELECT_CUE);
+  }, [playCue]);
+
+  const playLockSound = useCallback(() => {
+    playCue(LOCK_CUE);
+  }, [playCue]);
+
+  const playOtherLockSound = useCallback(() => {
+    playCue(REMOTE_LOCK_CUE);
+  }, [playCue]);
+
+  return useMemo(
+    () => ({
+      playSelectSound,
+      playLockSound,
+      playOtherLockSound,
+    }),
+    [playLockSound, playOtherLockSound, playSelectSound],
+  );
 }
