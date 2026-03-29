@@ -107,7 +107,7 @@ export function HomePage() {
                 </div>
                 <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
                   <p className="text-sm text-slate-300">Developed By:</p>
-                  <p className="mt-2 text-3xl font-semibold">Dieter Holstein</p>
+                  <p className="mt-2 text-1xl font-semibold">Dieter Holstein</p>
                 </div>
               </div>
             </div>
