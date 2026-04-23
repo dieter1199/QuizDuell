@@ -68,12 +68,20 @@ const CATEGORY_BADGE_CLASSES: Record<string, string> = {
 };
 
 function getCategoryBadgeClass(categoryId?: string | null) {
-  return categoryId ? (CATEGORY_BADGE_CLASSES[categoryId] ?? "border-white/10 bg-white/6 text-slate-200") : "border-white/10 bg-white/6 text-slate-200";
+  return categoryId
+    ? (CATEGORY_BADGE_CLASSES[categoryId] ??
+        "border-white/12 bg-[linear-gradient(180deg,rgba(43,53,74,0.92),rgba(29,37,54,0.92))] text-slate-100")
+    : "border-white/12 bg-[linear-gradient(180deg,rgba(43,53,74,0.92),rgba(29,37,54,0.92))] text-slate-100";
 }
 
 function formatCorrectRatio(correctCount: number, answeredCount: number) {
   return `${correctCount}/${answeredCount}`;
 }
+
+const ELEVATED_PANEL_CLASS =
+  "border border-white/12 bg-[linear-gradient(180deg,rgba(33,43,65,0.96),rgba(19,27,42,0.96))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
+const QUIET_PANEL_CLASS =
+  "border border-white/10 bg-[linear-gradient(180deg,rgba(17,24,38,0.94),rgba(10,15,27,0.98))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 
 function AnswerChip({
   selected,
@@ -94,13 +102,13 @@ function AnswerChip({
       disabled={disabled}
       onClick={onClick}
       className={[
-        "w-full rounded-[24px] border px-4 py-4 text-left text-base transition",
+        "w-full rounded-[24px] border px-4 py-4 text-left text-base transition duration-200",
         correct
-          ? "border-emerald-400/35 bg-emerald-500/12 text-emerald-50"
+          ? "border-emerald-400/40 bg-[linear-gradient(180deg,rgba(8,94,74,0.42),rgba(6,53,42,0.42))] text-emerald-50 shadow-[0_14px_34px_rgba(16,185,129,0.08),inset_0_1px_0_rgba(255,255,255,0.05)]"
           : selected
-            ? "border-amber-300/40 bg-amber-400/12 text-white"
-            : "border-white/10 bg-slate-950/55 text-slate-100 hover:bg-white/6",
-        disabled ? "cursor-not-allowed opacity-80" : "",
+            ? "border-amber-300/45 bg-[linear-gradient(180deg,rgba(133,77,14,0.34),rgba(72,47,11,0.34))] text-amber-50 shadow-[0_14px_34px_rgba(250,204,21,0.08),inset_0_1px_0_rgba(255,255,255,0.05)]"
+            : "border-white/10 bg-[linear-gradient(180deg,rgba(15,21,35,0.96),rgba(8,13,24,0.98))] text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] hover:border-slate-400/30 hover:bg-[linear-gradient(180deg,rgba(20,28,43,0.98),rgba(11,17,31,0.98))]",
+        disabled ? "cursor-not-allowed opacity-85" : "hover:-translate-y-[1px]",
       ].join(" ")}
     >
       {children}
@@ -160,7 +168,7 @@ function SmoothQuestionTimerBar({
   }, [paused, pausedMsRemaining, phaseEndsAt, roundId, timerSeconds]);
 
   return (
-    <div className="h-3 overflow-hidden rounded-full bg-white/6">
+    <div className="h-3 overflow-hidden rounded-full border border-white/10 bg-[rgba(255,255,255,0.06)]">
       <div
         ref={barRef}
         className="h-full origin-left rounded-full bg-[linear-gradient(90deg,#fb923c,#facc15)] transition-[transform] will-change-transform"
@@ -565,14 +573,14 @@ export function RoomPage({ code }: RoomPageProps) {
 
   if (!ready || room.loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,#13223d_0%,#09111d_55%,#03060b_100%)] text-white">
+      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_28%),radial-gradient(circle_at_top_right,rgba(251,146,60,0.12),transparent_24%),linear-gradient(180deg,#09121f_0%,#060d18_56%,#04070d_100%)] text-white">
         <Card>Loading room...</Card>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#10233d_0%,#09111d_52%,#04070d_100%)] px-4 py-6 text-white">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.16),transparent_28%),radial-gradient(circle_at_top_right,rgba(251,146,60,0.12),transparent_22%),radial-gradient(circle_at_center,rgba(14,165,233,0.06),transparent_40%),linear-gradient(180deg,#09121f_0%,#060d18_56%,#04070d_100%)] px-4 py-6 text-white">
       <div className="mx-auto max-w-7xl space-y-4 md:space-y-6">
         <header
           className={cn(
@@ -642,16 +650,16 @@ export function RoomPage({ code }: RoomPageProps) {
               >
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
                   <div className="flex flex-wrap gap-3">
-                    <div className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Room code</p>
+                    <div className={cn("rounded-[22px] px-4 py-3", ELEVATED_PANEL_CLASS)}>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300/70">Room code</p>
                       <p className="mt-1 text-xl font-semibold tracking-[0.24em] md:text-2xl">{code}</p>
                     </div>
-                    <div className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Players</p>
+                    <div className={cn("rounded-[22px] px-4 py-3", ELEVATED_PANEL_CLASS)}>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300/70">Players</p>
                       <p className="mt-1 text-xl font-semibold md:text-2xl">{activePlayers.length}</p>
                     </div>
-                    <div className="min-w-0 flex-1 rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 lg:min-w-[17rem]">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Shareable link</p>
+                    <div className={cn("min-w-0 flex-1 rounded-[22px] px-4 py-3 lg:min-w-[17rem]", ELEVATED_PANEL_CLASS)}>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300/70">Shareable link</p>
                       <p className="mt-1 truncate text-sm text-slate-200">{roomLink}</p>
                     </div>
                   </div>
@@ -705,8 +713,8 @@ export function RoomPage({ code }: RoomPageProps) {
                       </h2>
                     </div>
                     <div className="grid gap-3 md:justify-self-end">
-                      <div className="w-full max-w-[9rem] rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-left md:min-w-32 md:text-right">
-                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                      <div className={cn("w-full max-w-[9rem] rounded-[22px] px-4 py-3 text-left md:min-w-32 md:text-right", ELEVATED_PANEL_CLASS)}>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-300/70">
                           {isQuestionPhase ? "Timer" : "Continue"}
                         </p>
                         <p className="mt-1 text-3xl font-semibold md:text-4xl">
@@ -718,7 +726,7 @@ export function RoomPage({ code }: RoomPageProps) {
                                 ? "Finish"
                                 : "Ready"}
                         </p>
-                        <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-300/80">
+                        <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-200/80">
                           {isGamePaused
                             ? "Frozen"
                             : isQuestionPhase
@@ -762,10 +770,10 @@ export function RoomPage({ code }: RoomPageProps) {
                   ) : null}
 
                   {isQuestionPhase ? (
-                    <div className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-4">
+                    <div className={cn("rounded-[24px] px-4 py-4", ELEVATED_PANEL_CLASS)}>
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Locked in</p>
-                        <p className="text-xs uppercase tracking-[0.18em] text-slate-300/80">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-300/70">Locked in</p>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-200/80">
                           {lockedPlayers.length} / {game.requiredAnswerCount}
                         </p>
                       </div>
@@ -788,7 +796,7 @@ export function RoomPage({ code }: RoomPageProps) {
                             ))}
                           </div>
                         ) : (
-                          <p className="flex min-h-[2.75rem] items-center text-sm text-slate-400">
+                          <p className="flex min-h-[2.75rem] items-center text-sm text-slate-300/72">
                             Waiting for the first player to lock in.
                           </p>
                         )}
@@ -867,10 +875,10 @@ export function RoomPage({ code }: RoomPageProps) {
                         {currentRound?.submissions.map((submission) => (
                           <div
                             key={submission.id}
-                            className={`rounded-[22px] border p-4 ${
+                            className={`rounded-[22px] p-4 ${
                               submission.is_correct
-                                ? "border-emerald-400/30 bg-emerald-500/10"
-                                : "border-white/10 bg-white/5"
+                                ? "border border-emerald-400/30 bg-[linear-gradient(180deg,rgba(8,94,74,0.22),rgba(6,53,42,0.26))] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                                : ELEVATED_PANEL_CLASS
                             }`}
                           >
                             <div className="flex items-center justify-between gap-3">
@@ -890,7 +898,7 @@ export function RoomPage({ code }: RoomPageProps) {
                         ))}
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/10 bg-white/5 px-4 py-4">
+                      <div className={cn("flex flex-wrap items-center justify-between gap-4 rounded-[24px] px-4 py-4", ELEVATED_PANEL_CLASS)}>
                         <p className="text-sm text-slate-300">
                           {isGamePaused
                             ? "The host paused the reveal. The next question stays locked until the duel resumes."
@@ -924,18 +932,18 @@ export function RoomPage({ code }: RoomPageProps) {
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-3">
-                      <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                      <div className={cn("rounded-[24px] p-4", ELEVATED_PANEL_CLASS)}>
                         <p className="text-sm text-slate-300">Questions</p>
                         <p className="mt-2 text-3xl font-semibold">{plannedQuestionCount}</p>
                         {settingsDraft?.useAllQuestions ? (
-                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">All selected</p>
+                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-300/70">All selected</p>
                         ) : null}
                       </div>
-                      <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                      <div className={cn("rounded-[24px] p-4", ELEVATED_PANEL_CLASS)}>
                         <p className="text-sm text-slate-300">Timer</p>
                         <p className="mt-2 text-3xl font-semibold">{settingsDraft?.timerSeconds ?? 10}s</p>
                       </div>
-                      <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                      <div className={cn("rounded-[24px] p-4", ELEVATED_PANEL_CLASS)}>
                         <p className="text-sm text-slate-300">Question source</p>
                         <p className="mt-2 text-3xl font-semibold">
                           {settingsDraft?.useAllQuestions ? "All" : "Manual"}
@@ -948,7 +956,7 @@ export function RoomPage({ code }: RoomPageProps) {
                         <label className="block text-sm text-slate-200">
                           <span className="mb-2 flex items-center justify-between gap-3">
                             <span>Number of questions</span>
-                            <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                            <span className="inline-flex items-center gap-2 text-xs text-slate-300/70">
                               <input
                                 checked={settingsDraft.useAllQuestions}
                                 type="checkbox"
@@ -992,7 +1000,7 @@ export function RoomPage({ code }: RoomPageProps) {
                           />
                         </label>
 
-                        <div className="rounded-[24px] border border-white/10 bg-slate-950/45 p-4 text-sm text-slate-200">
+                        <div className={cn("rounded-[24px] p-4 text-sm text-slate-200", QUIET_PANEL_CLASS)}>
                           <p className="mb-3 font-medium text-white">Options</p>
                           <label className="flex items-center justify-between gap-3 py-2">
                             <span>Randomize question order</span>
@@ -1045,7 +1053,7 @@ export function RoomPage({ code }: RoomPageProps) {
                             {room.snapshot?.categories.map((category) => (
                               <label
                                 key={category.id}
-                                className="flex items-center justify-between rounded-[20px] border border-white/10 bg-white/5 px-4 py-3 text-sm"
+                                className={cn("flex items-center justify-between rounded-[20px] px-4 py-3 text-sm", ELEVATED_PANEL_CLASS)}
                               >
                                 <span>{category.name}</span>
                                 <input
@@ -1246,7 +1254,7 @@ export function RoomPage({ code }: RoomPageProps) {
                               Correct answers by category for every player in this duel.
                             </p>
                           </div>
-                          <div className="overflow-x-auto rounded-[24px] border border-white/10 bg-white/5">
+                          <div className={cn("overflow-x-auto rounded-[24px]", ELEVATED_PANEL_CLASS)}>
                             <table className="min-w-full text-sm">
                               <thead>
                                 <tr className="border-b border-white/10 text-left text-slate-300">
@@ -1300,7 +1308,7 @@ export function RoomPage({ code }: RoomPageProps) {
                             {selectedReviewPlayer.wrongQuestions.map((review) => (
                               <div
                                 key={review.answerId}
-                                className="rounded-[24px] border border-white/10 bg-white/5 p-4"
+                                className={cn("rounded-[24px] p-4", ELEVATED_PANEL_CLASS)}
                               >
                                 <div className="flex flex-wrap items-center gap-2">
                                   <Badge tone={review.timedOut ? "danger" : "muted"}>
@@ -1329,7 +1337,7 @@ export function RoomPage({ code }: RoomPageProps) {
                                           ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-50"
                                           : answer.isSelected
                                             ? "border-rose-300/25 bg-rose-500/10 text-rose-50"
-                                            : "border-white/10 bg-slate-950/45 text-slate-200",
+                                            : `${QUIET_PANEL_CLASS} text-slate-200`,
                                       )}
                                     >
                                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1389,7 +1397,7 @@ export function RoomPage({ code }: RoomPageProps) {
                   {activePlayers.map((player) => (
                     <div
                       key={player.id}
-                      className="flex items-center justify-between rounded-[22px] border border-white/10 bg-white/5 px-4 py-3"
+                      className={cn("flex items-center justify-between rounded-[22px] px-4 py-3", ELEVATED_PANEL_CLASS)}
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -1455,18 +1463,20 @@ export function RoomPage({ code }: RoomPageProps) {
                     }))).map((entry, index) => (
                     <div
                       key={entry.playerId}
-                      className={`rounded-[22px] border px-4 py-3 ${
-                        index === 0 ? "border-amber-300/25 bg-amber-400/10" : "border-white/10 bg-white/5"
+                      className={`rounded-[22px] px-4 py-3 ${
+                        index === 0
+                          ? "border border-amber-300/28 bg-[linear-gradient(180deg,rgba(120,53,15,0.2),rgba(70,40,12,0.24))] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                          : ELEVATED_PANEL_CLASS
                       }`}
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
-                          <div className="flex size-9 items-center justify-center rounded-full bg-white/10 text-sm font-semibold">
+                          <div className="flex size-9 items-center justify-center rounded-full border border-white/10 bg-[linear-gradient(180deg,rgba(48,58,81,0.92),rgba(30,38,56,0.92))] text-sm font-semibold">
                             {index + 1}
                           </div>
                           <div>
                             <p className="font-medium">{entry.displayName}</p>
-                            <p className="text-sm text-slate-400">
+                            <p className="text-sm text-slate-300/72">
                               {entry.isHost ? "Host" : "Player"} · {entry.connectionStatus}
                             </p>
                           </div>

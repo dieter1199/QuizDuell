@@ -9,11 +9,12 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const variantStyles: Record<NonNullable<ButtonProps["variant"]>, string> = {
   primary:
-    "bg-[linear-gradient(135deg,#f97316,#facc15)] text-slate-950 shadow-[0_14px_40px_rgba(249,115,22,0.28)] hover:brightness-105",
+    "bg-[linear-gradient(135deg,#fb923c_0%,#facc15_58%,#fde047_100%)] text-slate-950 shadow-[0_16px_44px_rgba(251,146,60,0.34)] hover:-translate-y-px hover:brightness-105",
   secondary:
-    "border border-white/15 bg-white/8 text-white hover:bg-white/12",
-  ghost: "bg-transparent text-slate-200 hover:bg-white/8",
-  danger: "bg-rose-500/90 text-white hover:bg-rose-500",
+    "border border-white/14 bg-[linear-gradient(180deg,rgba(45,56,79,0.96),rgba(27,35,52,0.96))] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] hover:border-white/22 hover:bg-[linear-gradient(180deg,rgba(54,66,91,0.98),rgba(33,41,61,0.98))]",
+  ghost:
+    "border border-transparent bg-transparent text-slate-200 hover:border-white/10 hover:bg-white/7",
+  danger: "bg-rose-500/90 text-white shadow-[0_14px_36px_rgba(244,63,94,0.2)] hover:bg-rose-500",
 };
 
 const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {
@@ -33,7 +34,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "inline-flex items-center justify-center rounded-2xl font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+        "inline-flex items-center justify-center rounded-2xl font-medium transition duration-200 disabled:cursor-not-allowed disabled:opacity-60",
         variantStyles[variant],
         sizeStyles[size],
         className,
