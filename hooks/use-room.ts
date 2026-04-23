@@ -18,12 +18,29 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [isPending, startTransition] = useTransition();
   const hasJoinedRef = useRef(false);
+  const lastAppliedVersionRef = useRef(-1);
+  const serverClockOffsetMsRef = useRef(0);
 
   const roomPath = useMemo(() => `/api/rooms/${code}`, [code]);
 
   const applySnapshot = useCallback((nextSnapshot: RoomSnapshot) => {
+    if (nextSnapshot.room.version < lastAppliedVersionRef.current) {
+      return;
+    }
+
+    const serverNow = new Date(nextSnapshot.server_time).getTime();
+
+    lastAppliedVersionRef.current = nextSnapshot.room.version;
+
+    if (Number.isFinite(serverNow)) {
+      const nextOffsetMs = serverNow - Date.now();
+      serverClockOffsetMsRef.current = nextOffsetMs;
+      setServerClockOffsetMs(nextOffsetMs);
+    }
+
     startTransition(() => {
       setSnapshot(nextSnapshot);
     });
@@ -79,6 +96,10 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
 
     setLoading(true);
     hasJoinedRef.current = false;
+    lastAppliedVersionRef.current = -1;
+    serverClockOffsetMsRef.current = 0;
+    setServerClockOffsetMs(0);
+    setSnapshot(null);
     void joinRoom();
   }, [code, profile?.displayName, profile?.playerToken, joinRoom]);
 
@@ -131,7 +152,9 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
     }
 
     const msUntilAdvance =
-      new Date(snapshot.game.session.phase_ends_at).getTime() - Date.now() + 150;
+      new Date(snapshot.game.session.phase_ends_at).getTime() -
+      (Date.now() + serverClockOffsetMsRef.current) +
+      150;
 
     const timeout = window.setTimeout(() => {
       void requestJson<SnapshotResponse>(`/api/games/${snapshot.game!.session.id}/actions`, {
@@ -139,6 +162,7 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
         body: {
           action: "advance",
           playerToken: profile?.playerToken,
+          advanceReveal: false,
         },
       })
         .then((payload) => {
@@ -231,6 +255,7 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
       leaveRoom,
       roomAction,
       gameAction,
+      serverClockOffsetMs,
     }),
     [
       applySnapshot,
@@ -242,6 +267,7 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
       loading,
       refreshSnapshot,
       roomAction,
+      serverClockOffsetMs,
       snapshot,
     ],
   );

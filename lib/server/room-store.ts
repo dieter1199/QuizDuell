@@ -21,6 +21,7 @@ type GlobalStore = {
 
 const globalStore = globalThis as typeof globalThis & {
   __quizduellStore?: GlobalStore;
+  __quizduellStoreLocks?: Map<string, Promise<void>>;
 };
 
 function createStore(): GlobalStore {
@@ -56,6 +57,37 @@ export function getRoomStore() {
   }
 
   return globalStore.__quizduellStore;
+}
+
+function getStoreLocks() {
+  if (!globalStore.__quizduellStoreLocks) {
+    globalStore.__quizduellStoreLocks = new Map<string, Promise<void>>();
+  }
+
+  return globalStore.__quizduellStoreLocks;
+}
+
+export async function withStoreLock<T>(key: string, operation: () => Promise<T>) {
+  const locks = getStoreLocks();
+  const previousLock = locks.get(key) ?? Promise.resolve();
+  let releaseLock: () => void = () => {};
+  const currentLock = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  const lockTail = previousLock.then(() => currentLock, () => currentLock);
+
+  locks.set(key, lockTail);
+  await previousLock.catch(() => {});
+
+  try {
+    return await operation();
+  } finally {
+    releaseLock();
+
+    if (locks.get(key) === lockTail) {
+      locks.delete(key);
+    }
+  }
 }
 
 async function getRuntimeCache() {

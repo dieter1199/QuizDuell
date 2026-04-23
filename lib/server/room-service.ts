@@ -15,6 +15,7 @@ import {
   findRoomByGameId,
   getRoomFromStore,
   setRoomInStore,
+  withStoreLock,
   type StoredGameSession,
   type StoredRoom,
 } from "@/lib/server/room-store";
@@ -40,11 +41,53 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function roomLockKey(roomCode: string) {
+  return `room:${roomCode}`;
+}
+
+async function withRoomByCode<T>(
+  roomCode: string,
+  operation: (room: StoredRoom) => Promise<T>,
+  notFoundMessage = "This room no longer exists.",
+) {
+  return withStoreLock(roomLockKey(roomCode), async () => {
+    const room = await getRoomFromStore(roomCode);
+
+    if (!room) {
+      throw new ApiError(404, notFoundMessage);
+    }
+
+    return operation(room);
+  });
+}
+
+async function withRoomByGameId<T>(
+  gameId: string,
+  operation: (room: StoredRoom) => Promise<T>,
+) {
+  const currentRoom = await findRoomByGameId(gameId);
+
+  if (!currentRoom) {
+    throw new ApiError(404, "This duel does not exist.");
+  }
+
+  return withStoreLock(roomLockKey(currentRoom.code), async () => {
+    const room = await findRoomByGameId(gameId);
+
+    if (!room || !room.game) {
+      throw new ApiError(404, "This duel does not exist.");
+    }
+
+    return operation(room);
+  });
+}
+
 function cloneRoomRecord(room: StoredRoom): RoomRecord {
   return {
     id: room.id,
     code: room.code,
     status: room.status,
+    version: room.version ?? 0,
     settings: structuredClone(room.settings),
     host_player_id: room.host_player_id,
     current_game_id: room.current_game_id,
@@ -55,6 +98,7 @@ function cloneRoomRecord(room: StoredRoom): RoomRecord {
 }
 
 function touchRoom(room: StoredRoom) {
+  room.version = (room.version ?? 0) + 1;
   room.updated_at = nowIso();
 }
 
@@ -136,6 +180,7 @@ function closeRoom(room: StoredRoom, reason: string) {
 
 function reconcileRoomPresence(room: StoredRoom) {
   const staleBefore = Date.now() - PLAYER_STALE_AFTER_MS;
+  let didUpdatePresence = false;
 
   for (const player of room.players) {
     if (
@@ -144,7 +189,12 @@ function reconcileRoomPresence(room: StoredRoom) {
       new Date(player.last_seen_at).getTime() < staleBefore
     ) {
       player.connection_status = "offline";
+      didUpdatePresence = true;
     }
+  }
+
+  if (didUpdatePresence) {
+    touchRoom(room);
   }
 
   const host = room.players.find((player) => player.is_host);
@@ -443,6 +493,7 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
     }));
 
     return {
+      server_time: nowIso(),
       room: roomRecord,
       me: playerToken ? lobbyPlayers.find((player) => player.player_token === playerToken) ?? null : null,
       players: lobbyPlayers,
@@ -465,6 +516,7 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
   const playerReviews = buildPlayerReviews(playersWithResults, game, categories);
 
   return {
+    server_time: nowIso(),
     room: roomRecord,
     me: playerToken
       ? playersWithResults.find((player) => player.player_token === playerToken) ?? null
@@ -508,40 +560,34 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
   } satisfies RoomSnapshot;
 }
 
-async function assertHost(roomCode: string, actorToken: string) {
-  const room = await getRoomFromStore(roomCode);
-
-  if (!room) {
-    throw new ApiError(404, "This room no longer exists.");
-  }
-
+function assertHost(room: StoredRoom, actorToken: string) {
   const player = getPlayerByToken(room, actorToken);
 
   if (!player || !player.is_host || player.status !== "active") {
     throw new ApiError(403, "Only the host can do that.");
   }
 
-  return { room, player };
+  return player;
 }
 
 export async function getRoomSnapshot(roomCode: string, playerToken?: string) {
-  const room = await getRoomFromStore(roomCode);
+  return withRoomByCode(
+    roomCode,
+    async (room) => {
+      if (playerToken) {
+        const player = getPlayerByToken(room, playerToken);
 
-  if (!room) {
-    throw new ApiError(404, "This room does not exist anymore.");
-  }
+        if (player?.status === "active") {
+          player.last_seen_at = nowIso();
+          player.connection_status = "online";
+          touchRoom(room);
+        }
+      }
 
-  if (playerToken) {
-    const player = getPlayerByToken(room, playerToken);
-
-    if (player?.status === "active") {
-      player.last_seen_at = nowIso();
-      player.connection_status = "online";
-      touchRoom(room);
-    }
-  }
-
-  return buildSnapshot(room, playerToken);
+      return buildSnapshot(room, playerToken);
+    },
+    "This room does not exist anymore.",
+  );
 }
 
 export async function createRoom(displayName: string, playerToken: string) {
@@ -568,6 +614,7 @@ export async function createRoom(displayName: string, playerToken: string) {
     id: roomId,
     code: roomCode,
     status: "lobby",
+    version: 1,
     settings: normalizeRoomSettings(undefined, categories.map((category) => category.id)),
     host_player_id: hostId,
     current_game_id: null,
@@ -597,348 +644,373 @@ export async function createRoom(displayName: string, playerToken: string) {
 }
 
 export async function joinRoom(roomCode: string, displayName: string, playerToken: string) {
-  const room = await getRoomFromStore(roomCode);
+  return withRoomByCode(
+    roomCode,
+    async (room) => {
+      if (room.status === "closed") {
+        throw new ApiError(404, "That room is no longer available.");
+      }
 
-  if (!room || room.status === "closed") {
-    throw new ApiError(404, "That room is no longer available.");
-  }
+      const existingPlayer = getPlayerByToken(room, playerToken);
 
-  const existingPlayer = getPlayerByToken(room, playerToken);
+      if (!existingPlayer && room.status === "active") {
+        throw new ApiError(409, "A duel is already running. Join again when the room returns to the lobby.");
+      }
 
-  if (!existingPlayer && room.status === "active") {
-    throw new ApiError(409, "A duel is already running. Join again when the room returns to the lobby.");
-  }
+      if (existingPlayer?.status === "kicked") {
+        throw new ApiError(403, "You were removed from this room.");
+      }
 
-  if (existingPlayer?.status === "kicked") {
-    throw new ApiError(403, "You were removed from this room.");
-  }
+      if (existingPlayer?.status === "left" && room.status === "active") {
+        throw new ApiError(409, "You already left this duel. Wait for the next lobby.");
+      }
 
-  if (existingPlayer?.status === "left" && room.status === "active") {
-    throw new ApiError(409, "You already left this duel. Wait for the next lobby.");
-  }
+      if (existingPlayer) {
+        existingPlayer.display_name = getUniqueDisplayName(room, displayName, existingPlayer.id);
+        existingPlayer.status = "active";
+        existingPlayer.connection_status = "online";
+        existingPlayer.last_seen_at = nowIso();
+        existingPlayer.left_at = null;
+      } else {
+        const timestamp = nowIso();
 
-  if (existingPlayer) {
-    existingPlayer.display_name = getUniqueDisplayName(room, displayName, existingPlayer.id);
-    existingPlayer.status = "active";
-    existingPlayer.connection_status = "online";
-    existingPlayer.last_seen_at = nowIso();
-    existingPlayer.left_at = null;
-  } else {
-    const timestamp = nowIso();
+        room.players.push({
+          id: crypto.randomUUID(),
+          room_id: room.id,
+          player_token: playerToken,
+          display_name: getUniqueDisplayName(room, displayName),
+          is_host: false,
+          status: "active",
+          connection_status: "online",
+          joined_at: timestamp,
+          last_seen_at: timestamp,
+          left_at: null,
+        });
+      }
 
-    room.players.push({
-      id: crypto.randomUUID(),
-      room_id: room.id,
-      player_token: playerToken,
-      display_name: getUniqueDisplayName(room, displayName),
-      is_host: false,
-      status: "active",
-      connection_status: "online",
-      joined_at: timestamp,
-      last_seen_at: timestamp,
-      left_at: null,
-    });
-  }
-
-  touchRoom(room);
-  return buildSnapshot(room, playerToken);
+      touchRoom(room);
+      return buildSnapshot(room, playerToken);
+    },
+    "That room is no longer available.",
+  );
 }
 
 export async function updateHeartbeat(roomCode: string, playerToken: string) {
-  const room = await getRoomFromStore(roomCode);
+  return withRoomByCode(
+    roomCode,
+    async (room) => {
+      if (room.status === "closed") {
+        throw new ApiError(404, "This room has already closed.");
+      }
 
-  if (!room || room.status === "closed") {
-    throw new ApiError(404, "This room has already closed.");
-  }
+      const player = getPlayerByToken(room, playerToken);
 
-  const player = getPlayerByToken(room, playerToken);
+      if (!player || player.status !== "active") {
+        throw new ApiError(404, "Player not found in this room.");
+      }
 
-  if (!player || player.status !== "active") {
-    throw new ApiError(404, "Player not found in this room.");
-  }
+      player.last_seen_at = nowIso();
+      player.connection_status = "online";
+      touchRoom(room);
 
-  player.last_seen_at = nowIso();
-  player.connection_status = "online";
-  touchRoom(room);
-
-  return buildSnapshot(room, playerToken);
+      return buildSnapshot(room, playerToken);
+    },
+    "This room has already closed.",
+  );
 }
 
 export async function leaveRoom(roomCode: string, playerToken: string) {
-  const room = await getRoomFromStore(roomCode);
+  return withStoreLock(roomLockKey(roomCode), async () => {
+    const room = await getRoomFromStore(roomCode);
 
-  if (!room) {
-    return;
-  }
+    if (!room) {
+      return;
+    }
 
-  const player = getPlayerByToken(room, playerToken);
+    const player = getPlayerByToken(room, playerToken);
 
-  if (!player || player.status !== "active") {
-    return;
-  }
+    if (!player || player.status !== "active") {
+      return;
+    }
 
-  if (player.is_host) {
-    closeRoom(room, "host_left");
-  }
+    if (player.is_host) {
+      closeRoom(room, "host_left");
+    }
 
-  player.status = "left";
-  player.connection_status = "offline";
-  player.left_at = nowIso();
-  touchRoom(room);
+    player.status = "left";
+    player.connection_status = "offline";
+    player.left_at = nowIso();
+    touchRoom(room);
 
-  if (room.game && !player.is_host) {
-    await maybeAdvanceGame(room);
-  }
+    if (room.game && !player.is_host) {
+      await maybeAdvanceGame(room);
+    }
 
-  await setRoomInStore(room);
+    await setRoomInStore(room);
+  });
 }
 
 export async function kickPlayer(roomCode: string, actorToken: string, playerId: string) {
-  const { room } = await assertHost(roomCode, actorToken);
-  const targetPlayer = room.players.find((player) => player.id === playerId) ?? null;
+  return withRoomByCode(roomCode, async (room) => {
+    assertHost(room, actorToken);
+    const targetPlayer = room.players.find((player) => player.id === playerId) ?? null;
 
-  if (!targetPlayer) {
-    throw new ApiError(404, "Player not found.");
-  }
+    if (!targetPlayer) {
+      throw new ApiError(404, "Player not found.");
+    }
 
-  if (targetPlayer.is_host) {
-    throw new ApiError(400, "The host cannot be kicked.");
-  }
+    if (targetPlayer.is_host) {
+      throw new ApiError(400, "The host cannot be kicked.");
+    }
 
-  targetPlayer.status = "kicked";
-  targetPlayer.connection_status = "offline";
-  targetPlayer.left_at = nowIso();
-  touchRoom(room);
+    targetPlayer.status = "kicked";
+    targetPlayer.connection_status = "offline";
+    targetPlayer.left_at = nowIso();
+    touchRoom(room);
 
-  if (room.game) {
-    await maybeAdvanceGame(room);
-  }
+    if (room.game) {
+      await maybeAdvanceGame(room);
+    }
 
-  return buildSnapshot(room, actorToken);
+    return buildSnapshot(room, actorToken);
+  });
 }
 
 export async function updateRoomSettings(roomCode: string, actorToken: string, settings: RoomSettings) {
-  const { room } = await assertHost(roomCode, actorToken);
+  return withRoomByCode(roomCode, async (room) => {
+    assertHost(room, actorToken);
 
-  if (room.status !== "lobby") {
-    throw new ApiError(409, "Settings can only be changed from the lobby.");
-  }
+    if (room.status !== "lobby") {
+      throw new ApiError(409, "Settings can only be changed from the lobby.");
+    }
 
-  room.settings = structuredClone(settings);
-  touchRoom(room);
+    room.settings = structuredClone(settings);
+    touchRoom(room);
 
-  return buildSnapshot(room, actorToken);
+    return buildSnapshot(room, actorToken);
+  });
 }
 
 export async function startGame(roomCode: string, actorToken: string) {
-  const { room } = await assertHost(roomCode, actorToken);
+  return withRoomByCode(roomCode, async (room) => {
+    assertHost(room, actorToken);
 
-  if (room.status !== "lobby") {
-    throw new ApiError(409, "Finish the current duel before starting another one.");
-  }
+    if (room.status !== "lobby") {
+      throw new ApiError(409, "Finish the current duel before starting another one.");
+    }
 
-  const categories = await getCategoryBank();
-  const settings = normalizeRoomSettings(room.settings, categories.map((category) => category.id));
-  const selectedQuestions = categories
-    .filter((category) => settings.selectedCategoryIds.includes(category.id))
-    .flatMap((category) => category.questions);
+    const categories = await getCategoryBank();
+    const settings = normalizeRoomSettings(room.settings, categories.map((category) => category.id));
+    const selectedQuestions = categories
+      .filter((category) => settings.selectedCategoryIds.includes(category.id))
+      .flatMap((category) => category.questions);
 
-  if (!settings.selectedCategoryIds.length) {
-    throw new ApiError(400, "Select at least one category.");
-  }
+    if (!settings.selectedCategoryIds.length) {
+      throw new ApiError(400, "Select at least one category.");
+    }
 
-  if (!selectedQuestions.length) {
-    throw new ApiError(400, "No questions are available for the selected categories.");
-  }
+    if (!selectedQuestions.length) {
+      throw new ApiError(400, "No questions are available for the selected categories.");
+    }
 
-  if (!settings.useAllQuestions && selectedQuestions.length < settings.questionCount) {
-    throw new ApiError(
-      400,
-      `Only ${selectedQuestions.length} questions are available for the selected categories.`,
-    );
-  }
+    if (!settings.useAllQuestions && selectedQuestions.length < settings.questionCount) {
+      throw new ApiError(
+        400,
+        `Only ${selectedQuestions.length} questions are available for the selected categories.`,
+      );
+    }
 
-  const activePlayers = room.players.filter((player) => player.status === "active");
+    const activePlayers = room.players.filter((player) => player.status === "active");
 
-  if (activePlayers.length < 2) {
-    throw new ApiError(400, "At least 2 active players are required.");
-  }
+    if (activePlayers.length < 2) {
+      throw new ApiError(400, "At least 2 active players are required.");
+    }
 
-  const orderedQuestions = settings.randomizeQuestionOrder
-    ? shuffleArray(selectedQuestions)
-    : [...selectedQuestions].sort((left, right) => left.created_at.localeCompare(right.created_at));
-  const questionsForGame = settings.useAllQuestions
-    ? orderedQuestions
-    : orderedQuestions.slice(0, settings.questionCount);
-  const timestamp = nowIso();
-  const gameId = crypto.randomUUID();
+    const orderedQuestions = settings.randomizeQuestionOrder
+      ? shuffleArray(selectedQuestions)
+      : [...selectedQuestions].sort((left, right) => left.created_at.localeCompare(right.created_at));
+    const questionsForGame = settings.useAllQuestions
+      ? orderedQuestions
+      : orderedQuestions.slice(0, settings.questionCount);
+    const timestamp = nowIso();
+    const gameId = crypto.randomUUID();
 
-  room.game = {
-    id: gameId,
-    room_id: room.id,
-    status: "active",
-    phase: "question",
-    is_paused: false,
-    paused_ms_remaining: null,
-    current_round_number: 1,
-    total_rounds: questionsForGame.length,
-    settings: structuredClone(settings),
-    phase_started_at: timestamp,
-    phase_ends_at: new Date(Date.now() + settings.timerSeconds * 1000).toISOString(),
-    started_at: timestamp,
-    ended_at: null,
-    rounds: questionsForGame.map((question, index) => ({
-      id: crypto.randomUUID(),
-      game_session_id: gameId,
-      question_id: question.id,
-      round_number: index + 1,
-      answer_order: createAnswerOrder(settings.randomizeAnswerOrder),
-      created_at: timestamp,
-    })),
-    answers: [],
-  };
-  room.status = "active";
-  room.current_game_id = gameId;
-  room.closed_reason = null;
-  touchRoom(room);
+    room.game = {
+      id: gameId,
+      room_id: room.id,
+      status: "active",
+      phase: "question",
+      is_paused: false,
+      paused_ms_remaining: null,
+      current_round_number: 1,
+      total_rounds: questionsForGame.length,
+      settings: structuredClone(settings),
+      phase_started_at: timestamp,
+      phase_ends_at: new Date(Date.now() + settings.timerSeconds * 1000).toISOString(),
+      started_at: timestamp,
+      ended_at: null,
+      rounds: questionsForGame.map((question, index) => ({
+        id: crypto.randomUUID(),
+        game_session_id: gameId,
+        question_id: question.id,
+        round_number: index + 1,
+        answer_order: createAnswerOrder(settings.randomizeAnswerOrder),
+        created_at: timestamp,
+      })),
+      answers: [],
+    };
+    room.status = "active";
+    room.current_game_id = gameId;
+    room.closed_reason = null;
+    touchRoom(room);
 
-  return buildSnapshot(room, actorToken);
+    return buildSnapshot(room, actorToken);
+  });
 }
 
 export async function submitAnswer(gameId: string, playerToken: string, selectedIndexes: number[]) {
-  const room = await findRoomByGameId(gameId);
+  return withRoomByGameId(gameId, async (room) => {
+    await maybeAdvanceGame(room);
 
-  if (!room || !room.game) {
-    throw new ApiError(404, "This duel does not exist.");
-  }
+    const game = room.game;
 
-  await maybeAdvanceGame(room);
+    if (!game) {
+      throw new ApiError(404, "This duel does not exist.");
+    }
 
-  const game = room.game;
+    if (game.is_paused) {
+      throw new ApiError(409, "This duel is currently paused.");
+    }
 
-  if (game.is_paused) {
-    throw new ApiError(409, "This duel is currently paused.");
-  }
+    if (game.status !== "active" || game.phase !== "question") {
+      throw new ApiError(409, "This question is already locked.");
+    }
 
-  if (game.status !== "active" || game.phase !== "question") {
-    throw new ApiError(409, "This question is already locked.");
-  }
+    const currentRound = game.rounds.find((round) => round.round_number === game.current_round_number) ?? null;
 
-  const currentRound = game.rounds.find((round) => round.round_number === game.current_round_number) ?? null;
+    if (!currentRound) {
+      throw new ApiError(500, "The current round could not be found.");
+    }
 
-  if (!currentRound) {
-    throw new ApiError(500, "The current round could not be found.");
-  }
+    const player = assertActivePlayer(room, playerToken);
 
-  const player = assertActivePlayer(room, playerToken);
+    if (game.answers.some((answer) => answer.round_id === currentRound.id && answer.player_id === player.id)) {
+      throw new ApiError(409, "Your answer is already locked in.");
+    }
 
-  if (game.answers.some((answer) => answer.round_id === currentRound.id && answer.player_id === player.id)) {
-    throw new ApiError(409, "Your answer is already locked in.");
-  }
+    const categories = await getCategoryBank();
+    const question = categories
+      .flatMap((category) => category.questions)
+      .find((entry) => entry.id === currentRound.question_id);
 
-  const categories = await getCategoryBank();
-  const question = categories
-    .flatMap((category) => category.questions)
-    .find((entry) => entry.id === currentRound.question_id);
+    if (!question) {
+      throw new ApiError(500, "The current question could not be found.");
+    }
 
-  if (!question) {
-    throw new ApiError(500, "The current question could not be found.");
-  }
+    const scoring = evaluateSelection(
+      selectedIndexes,
+      question,
+      currentRound.answer_order,
+    );
 
-  const scoring = evaluateSelection(
-    selectedIndexes,
-    question,
-    currentRound.answer_order,
-  );
+    game.answers.push({
+      id: crypto.randomUUID(),
+      round_id: currentRound.id,
+      player_id: player.id,
+      selected_indexes: scoring.normalizedSelection,
+      is_correct: scoring.isCorrect,
+      timed_out: false,
+      submitted_at: nowIso(),
+    });
+    touchRoom(room);
 
-  game.answers.push({
-    id: crypto.randomUUID(),
-    round_id: currentRound.id,
-    player_id: player.id,
-    selected_indexes: scoring.normalizedSelection,
-    is_correct: scoring.isCorrect,
-    timed_out: false,
-    submitted_at: nowIso(),
+    await maybeAdvanceGame(room);
+
+    return buildSnapshot(room, playerToken);
   });
-  touchRoom(room);
-
-  await maybeAdvanceGame(room);
-
-  return buildSnapshot(room, playerToken);
 }
 
-export async function advanceGame(gameId: string, playerToken?: string) {
-  const room = await findRoomByGameId(gameId);
+export async function advanceGame(
+  gameId: string,
+  playerToken?: string,
+  options?: { advanceReveal?: boolean },
+) {
+  return withRoomByGameId(gameId, async (room) => {
+    const actor = playerToken ? assertActivePlayer(room, playerToken) : null;
+    const shouldAdvanceReveal = options?.advanceReveal ?? false;
 
-  if (!room) {
-    throw new ApiError(404, "This room no longer exists.");
-  }
+    if (shouldAdvanceReveal && !actor?.is_host) {
+      throw new ApiError(403, "Only the host can continue to the next question.");
+    }
 
-  if (playerToken) {
-    assertActivePlayer(room, playerToken);
-  } else if (room.game?.phase === "reveal") {
-    throw new ApiError(400, "An active player is required to continue from the reveal.");
-  }
+    const game = await maybeAdvanceGame(room, {
+      advanceReveal: shouldAdvanceReveal && room.game?.phase === "reveal",
+    });
 
-  const game = await maybeAdvanceGame(room, { advanceReveal: room.game?.phase === "reveal" });
+    if (!game) {
+      throw new ApiError(404, "This duel does not exist.");
+    }
 
-  if (!game) {
-    throw new ApiError(404, "This duel does not exist.");
-  }
-
-  return buildSnapshot(room, playerToken);
+    return buildSnapshot(room, playerToken);
+  });
 }
 
 export async function pauseGame(roomCode: string, actorToken: string) {
-  const { room } = await assertHost(roomCode, actorToken);
-  const game = room.game;
+  return withRoomByCode(roomCode, async (room) => {
+    assertHost(room, actorToken);
+    const game = room.game;
 
-  if (!game || game.status !== "active" || game.phase === "finished") {
-    throw new ApiError(409, "There is no active duel to pause.");
-  }
+    if (!game || game.status !== "active" || game.phase === "finished") {
+      throw new ApiError(409, "There is no active duel to pause.");
+    }
 
-  if (game.is_paused) {
-    throw new ApiError(409, "This duel is already paused.");
-  }
+    if (game.is_paused) {
+      throw new ApiError(409, "This duel is already paused.");
+    }
 
-  game.is_paused = true;
-  game.paused_ms_remaining = remainingMsUntil(game.phase_ends_at);
-  touchRoom(room);
+    game.is_paused = true;
+    game.paused_ms_remaining = remainingMsUntil(game.phase_ends_at);
+    touchRoom(room);
 
-  return buildSnapshot(room, actorToken);
+    return buildSnapshot(room, actorToken);
+  });
 }
 
 export async function resumeGame(roomCode: string, actorToken: string) {
-  const { room } = await assertHost(roomCode, actorToken);
-  const game = room.game;
+  return withRoomByCode(roomCode, async (room) => {
+    assertHost(room, actorToken);
+    const game = room.game;
 
-  if (!game || game.status !== "active" || game.phase === "finished") {
-    throw new ApiError(409, "There is no active duel to resume.");
-  }
+    if (!game || game.status !== "active" || game.phase === "finished") {
+      throw new ApiError(409, "There is no active duel to resume.");
+    }
 
-  if (!game.is_paused) {
-    throw new ApiError(409, "This duel is not paused.");
-  }
+    if (!game.is_paused) {
+      throw new ApiError(409, "This duel is not paused.");
+    }
 
-  game.phase_ends_at = futureIsoFromNow(game.paused_ms_remaining ?? 0);
-  clearPauseState(room);
-  touchRoom(room);
+    game.phase_ends_at = futureIsoFromNow(game.paused_ms_remaining ?? 0);
+    clearPauseState(room);
+    touchRoom(room);
 
-  return buildSnapshot(room, actorToken);
+    return buildSnapshot(room, actorToken);
+  });
 }
 
 export async function replayRoom(roomCode: string, actorToken: string) {
-  const { room } = await assertHost(roomCode, actorToken);
+  return withRoomByCode(roomCode, async (room) => {
+    assertHost(room, actorToken);
 
-  if (room.status === "closed") {
-    throw new ApiError(409, "This room has already closed.");
-  }
+    if (room.status === "closed") {
+      throw new ApiError(409, "This room has already closed.");
+    }
 
-  room.status = "lobby";
-  room.current_game_id = null;
-  room.closed_reason = null;
-  room.game = null;
-  touchRoom(room);
+    room.status = "lobby";
+    room.current_game_id = null;
+    room.closed_reason = null;
+    room.game = null;
+    touchRoom(room);
 
-  return buildSnapshot(room, actorToken);
+    return buildSnapshot(room, actorToken);
+  });
 }

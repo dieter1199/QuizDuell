@@ -39,6 +39,7 @@ export type RoomRecord = {
   id: string;
   code: string;
   status: RoomStatus;
+  version: number;
   settings: RoomSettings;
   host_player_id: string | null;
   current_game_id: string | null;
@@ -178,6 +179,7 @@ export type GameSnapshot = {
 };
 
 export type RoomSnapshot = {
+  server_time: string;
   room: RoomRecord;
   me: RoomPlayerSnapshot | null;
   players: RoomPlayerSnapshot[];

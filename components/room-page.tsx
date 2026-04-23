@@ -19,7 +19,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CategoryManager } from "@/components/category-manager";
 import { NameDialog } from "@/components/name-dialog";
@@ -113,12 +113,14 @@ function SmoothQuestionTimerBar({
   pausedMsRemaining,
   paused,
   roundId,
+  serverClockOffsetMs,
   timerSeconds,
 }: {
   phaseEndsAt: string;
   pausedMsRemaining: number | null;
   paused: boolean;
   roundId: string;
+  serverClockOffsetMs: number;
   timerSeconds: number;
 }) {
   const barRef = useRef<HTMLDivElement | null>(null);
@@ -132,7 +134,7 @@ function SmoothQuestionTimerBar({
 
     const remainingMs = paused
       ? Math.max(0, pausedMsRemaining ?? 0)
-      : Math.max(0, new Date(phaseEndsAt).getTime() - Date.now());
+      : Math.max(0, new Date(phaseEndsAt).getTime() - (Date.now() + serverClockOffsetMs));
     const nextProgress = timerSeconds > 0
       ? Math.min(1, Math.max(0, remainingMs / (timerSeconds * 1000)))
       : 0;
@@ -157,7 +159,7 @@ function SmoothQuestionTimerBar({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [paused, pausedMsRemaining, phaseEndsAt, roundId, timerSeconds]);
+  }, [paused, pausedMsRemaining, phaseEndsAt, roundId, serverClockOffsetMs, timerSeconds]);
 
   return (
     <div className="h-3 overflow-hidden rounded-full bg-white/6">
@@ -181,15 +183,18 @@ export function RoomPage({ code }: RoomPageProps) {
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
+  const [pendingSubmissionRoundId, setPendingSubmissionRoundId] = useState<string | null>(null);
   const [showWrongQuestions, setShowWrongQuestions] = useState(false);
   const [selectedReviewPlayerId, setSelectedReviewPlayerId] = useState<string | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<RoomSettings | null>(null);
   const [isSettingsDraftDirty, setIsSettingsDraftDirty] = useState(false);
   const [now, setNow] = useState(Date.now());
   const seenSubmissionIdsRef = useRef<Set<string>>(new Set());
+  const submittingRoundRef = useRef<string | null>(null);
 
   const room = useRoom(code, profile && hasDisplayName ? profile : null);
   const gameAction = room.gameAction;
+  const refreshRoom = room.refresh;
   const playLockSound = sounds.playLockSound;
 
   useEffect(() => {
@@ -214,6 +219,8 @@ export function RoomPage({ code }: RoomPageProps) {
 
   useEffect(() => {
     setSelectedIndexes([]);
+    setPendingSubmissionRoundId(null);
+    submittingRoundRef.current = null;
   }, [room.snapshot?.game?.currentRound?.round.id]);
 
   const activePlayers = useMemo(
@@ -251,10 +258,15 @@ export function RoomPage({ code }: RoomPageProps) {
   const activePhase = game?.session.phase ?? null;
   const activePhaseEndsAt = game?.session.phase_ends_at ?? null;
   const currentRoundId = currentRound?.round.id ?? null;
+  const isSubmittingAnswer = Boolean(
+    currentRoundId && pendingSubmissionRoundId === currentRoundId,
+  );
+  const hasSubmittedOrPending = hasSubmitted || isSubmittingAnswer;
+  const estimatedServerNow = now + room.serverClockOffsetMs;
   const phaseMsRemaining = game && isQuestionPhase
     ? game.session.is_paused
       ? game.session.paused_ms_remaining ?? 0
-      : Math.max(0, new Date(game.session.phase_ends_at).getTime() - now)
+      : Math.max(0, new Date(game.session.phase_ends_at).getTime() - estimatedServerNow)
     : 0;
   const phaseSecondsRemaining = formatCountdown(phaseMsRemaining);
   const selectedQuestionCount = useMemo(() => {
@@ -272,7 +284,7 @@ export function RoomPage({ code }: RoomPageProps) {
   const isLastRound = Boolean(
     game && game.session.current_round_number >= game.session.total_rounds,
   );
-  const canAdvanceToNext = Boolean(game && isRevealPhase && !isGamePaused);
+  const canAdvanceToNext = Boolean(game && isRevealPhase && !isGamePaused && isHost);
   const showQuickLinks = !game || game.session.status !== "active";
   const orderedReviewPlayers = useMemo(() => {
     if (!game) {
@@ -378,7 +390,7 @@ export function RoomPage({ code }: RoomPageProps) {
   }, [game, orderedReviewPlayers, room.snapshot?.me?.id]);
 
   const handleToggleAnswer = (displayIndex: number) => {
-    if (!game || game.session.phase !== "question" || game.session.is_paused || hasSubmitted) {
+    if (!game || game.session.phase !== "question" || game.session.is_paused || hasSubmittedOrPending) {
       return;
     }
 
@@ -449,7 +461,7 @@ export function RoomPage({ code }: RoomPageProps) {
   };
 
   const handleAdvanceRound = async () => {
-    if (!room.snapshot?.me || !game) {
+    if (!room.snapshot?.me || !game || !isHost) {
       return;
     }
 
@@ -457,6 +469,7 @@ export function RoomPage({ code }: RoomPageProps) {
       await room.gameAction({
         action: "advance",
         playerToken: room.snapshot.me.player_token,
+        advanceReveal: true,
       });
       setStatusMessage(isLastRound ? "Showing final results." : "Next question loaded.");
     } catch (advanceError) {
@@ -516,6 +529,67 @@ export function RoomPage({ code }: RoomPageProps) {
     }
   };
 
+  const submitSelectedAnswer = useCallback(
+    async (source: "manual" | "auto") => {
+      if (
+        !myPlayerToken ||
+        !currentRoundId ||
+        !game ||
+        activePhase !== "question" ||
+        isGamePaused ||
+        hasSubmitted ||
+        selectedIndexes.length === 0 ||
+        submittingRoundRef.current === currentRoundId
+      ) {
+        return;
+      }
+
+      const selection = [...selectedIndexes];
+
+      submittingRoundRef.current = currentRoundId;
+      setPendingSubmissionRoundId(currentRoundId);
+
+      try {
+        await gameAction({
+          action: "submitAnswer",
+          playerToken: myPlayerToken,
+          selectedIndexes: selection,
+        });
+        playLockSound();
+        setStatusMessage(source === "auto" ? "Answer auto-locked." : "Answer locked in.");
+      } catch (submitError) {
+        const message = submitError instanceof Error
+          ? submitError.message
+          : "Unable to submit the answer.";
+
+        if (message.toLowerCase().includes("already locked")) {
+          setStatusMessage("Answer is already locked in.");
+          await refreshRoom();
+        } else {
+          setStatusMessage(message);
+        }
+      } finally {
+        if (submittingRoundRef.current === currentRoundId) {
+          submittingRoundRef.current = null;
+        }
+
+        setPendingSubmissionRoundId((current) => (current === currentRoundId ? null : current));
+      }
+    },
+    [
+      activePhase,
+      currentRoundId,
+      game,
+      gameAction,
+      hasSubmitted,
+      isGamePaused,
+      myPlayerToken,
+      playLockSound,
+      refreshRoom,
+      selectedIndexes,
+    ],
+  );
+
   useEffect(() => {
     if (
       !activeGameId ||
@@ -523,28 +597,21 @@ export function RoomPage({ code }: RoomPageProps) {
       activePhase !== "question" ||
       !activePhaseEndsAt ||
       isGamePaused ||
-      hasSubmitted ||
+      hasSubmittedOrPending ||
       selectedIndexes.length === 0 ||
       !myPlayerToken
     ) {
       return;
     }
 
-    // Submit a fraction before expiry so the selection reaches the server
-    // before the round advances.
-    const msUntilAutoLock = new Date(activePhaseEndsAt).getTime() - Date.now() - 80;
+    // Submit before expiry with enough margin for network jitter and clock offset.
+    const msUntilAutoLock =
+      new Date(activePhaseEndsAt).getTime() -
+      (Date.now() + room.serverClockOffsetMs) -
+      300;
 
     const timeout = window.setTimeout(() => {
-      void gameAction({
-        action: "submitAnswer",
-        playerToken: myPlayerToken,
-        selectedIndexes: [...selectedIndexes],
-      })
-        .then(() => {
-          playLockSound();
-          setStatusMessage("Answer auto-locked.");
-        })
-        .catch(() => {});
+      void submitSelectedAnswer("auto");
     }, Math.max(0, msUntilAutoLock));
 
     return () => {
@@ -555,12 +622,12 @@ export function RoomPage({ code }: RoomPageProps) {
     activePhase,
     activePhaseEndsAt,
     currentRoundId,
-    gameAction,
-    hasSubmitted,
+    hasSubmittedOrPending,
     isGamePaused,
     myPlayerToken,
-    playLockSound,
+    room.serverClockOffsetMs,
     selectedIndexes,
+    submitSelectedAnswer,
   ]);
 
   if (!ready || room.loading) {
@@ -723,7 +790,9 @@ export function RoomPage({ code }: RoomPageProps) {
                             ? "Frozen"
                             : isQuestionPhase
                               ? "Live"
-                              : "Any player"}
+                              : isHost
+                                ? "Host"
+                                : "Host only"}
                         </p>
                       </div>
                       {isHost ? (
@@ -745,6 +814,7 @@ export function RoomPage({ code }: RoomPageProps) {
                       pausedMsRemaining={game.session.paused_ms_remaining}
                       phaseEndsAt={game.session.phase_ends_at}
                       roundId={currentRound.round.id}
+                      serverClockOffsetMs={room.serverClockOffsetMs}
                       timerSeconds={game.session.settings.timerSeconds}
                     />
                   ) : null}
@@ -804,7 +874,7 @@ export function RoomPage({ code }: RoomPageProps) {
                         <AnswerChip
                           key={`${currentRound.round.id}-${answer.displayIndex}`}
                           selected={selected}
-                          disabled={revealed || hasSubmitted || isGamePaused}
+                          disabled={revealed || hasSubmittedOrPending || isGamePaused}
                           correct={revealed ? answer.isCorrect : false}
                           onClick={() => handleToggleAnswer(answer.displayIndex)}
                         >
@@ -827,31 +897,19 @@ export function RoomPage({ code }: RoomPageProps) {
                           : "Choose 1 or 2 answers. Exact matches count as correct, and selected answers auto-lock at 0."}
                       </div>
                       <Button
-                        disabled={isGamePaused || selectedIndexes.length === 0 || hasSubmitted}
-                        onClick={async () => {
-                          if (!room.snapshot?.me) {
-                            return;
-                          }
-
-                          try {
-                            await room.gameAction({
-                              action: "submitAnswer",
-                              playerToken: room.snapshot.me.player_token,
-                              selectedIndexes,
-                            });
-                            sounds.playLockSound();
-                            setStatusMessage("Answer locked in.");
-                          } catch (submitError) {
-                            setStatusMessage(
-                              submitError instanceof Error
-                                ? submitError.message
-                                : "Unable to submit the answer.",
-                            );
-                          }
+                        disabled={isGamePaused || selectedIndexes.length === 0 || hasSubmittedOrPending}
+                        onClick={() => {
+                          void submitSelectedAnswer("manual");
                         }}
                       >
                         <Play className="mr-2 size-4" />
-                        {isGamePaused ? "Paused" : hasSubmitted ? "Waiting..." : "Lock answer"}
+                        {isGamePaused
+                          ? "Paused"
+                          : isSubmittingAnswer
+                            ? "Locking..."
+                            : hasSubmitted
+                              ? "Waiting..."
+                              : "Lock answer"}
                       </Button>
                     </div>
                   ) : (
@@ -895,13 +953,17 @@ export function RoomPage({ code }: RoomPageProps) {
                           {isGamePaused
                             ? "The host paused the reveal. The next question stays locked until the duel resumes."
                             : isLastRound
-                              ? "Any player can open the final results."
-                              : "Any player can continue to the next question."}
+                              ? "The host can open the final results."
+                              : "The host can continue to the next question."}
                         </p>
-                        <Button disabled={!canAdvanceToNext} onClick={handleAdvanceRound}>
-                          <Play className="mr-2 size-4" />
-                          {isLastRound ? "Show results" : "Next question"}
-                        </Button>
+                        {isHost ? (
+                          <Button disabled={!canAdvanceToNext} onClick={handleAdvanceRound}>
+                            <Play className="mr-2 size-4" />
+                            {isLastRound ? "Show results" : "Next question"}
+                          </Button>
+                        ) : (
+                          <Badge tone="muted">Waiting for host</Badge>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1502,8 +1564,8 @@ export function RoomPage({ code }: RoomPageProps) {
                     {isQuestionPhase
                       ? `${game.submittedAnswerCount} / ${game.requiredAnswerCount} active players have submitted.`
                       : isLastRound
-                        ? "The final answers are in. Any player can open the results."
-                        : "The answers are revealed. Any player can continue to the next question."}
+                        ? "The final answers are in. The host can open the results."
+                        : "The answers are revealed. The host can continue to the next question."}
                   </p>
                 </Card>
               ) : null}

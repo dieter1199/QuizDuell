@@ -23,7 +23,9 @@ export async function POST(request: Request, context: RouteContext) {
         return jsonOk({ snapshot });
       }
       case "advance": {
-        const snapshot = await advanceGame(gameId, action.playerToken);
+        const snapshot = await advanceGame(gameId, action.playerToken, {
+          advanceReveal: action.advanceReveal ?? false,
+        });
         return jsonOk({ snapshot });
       }
     }

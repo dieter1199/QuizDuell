@@ -107,5 +107,6 @@ export const gameActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("advance"),
     playerToken: z.string().uuid().optional(),
+    advanceReveal: z.boolean().optional(),
   }),
 ]);
