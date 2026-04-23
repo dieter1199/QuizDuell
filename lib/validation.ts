@@ -37,9 +37,9 @@ export const questionSchema = z.object({
 });
 
 export const roomSettingsSchema = z.object({
-  questionCount: z.number().int().min(5).max(30),
+  questionCount: z.number().int().min(1).max(30),
+  useAllQuestions: z.boolean(),
   timerSeconds: z.number().int().min(5).max(30),
-  pointsPerQuestion: z.number().int().min(5).max(50),
   selectedCategoryIds: z.array(z.string().uuid()).min(1, "Select at least one category."),
   randomizeQuestionOrder: z.boolean(),
   randomizeAnswerOrder: z.boolean(),
@@ -78,6 +78,14 @@ export const roomActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("startGame"),
+    actorToken: z.string().uuid(),
+  }),
+  z.object({
+    action: z.literal("pauseGame"),
+    actorToken: z.string().uuid(),
+  }),
+  z.object({
+    action: z.literal("resumeGame"),
     actorToken: z.string().uuid(),
   }),
   z.object({

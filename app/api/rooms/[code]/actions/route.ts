@@ -1,7 +1,9 @@
 import {
   kickPlayer,
   leaveRoom,
+  pauseGame,
   replayRoom,
+  resumeGame,
   startGame,
   updateHeartbeat,
   updateRoomSettings,
@@ -43,6 +45,14 @@ export async function POST(request: Request, context: RouteContext) {
       }
       case "startGame": {
         const snapshot = await startGame(code, action.actorToken);
+        return jsonOk({ snapshot });
+      }
+      case "pauseGame": {
+        const snapshot = await pauseGame(code, action.actorToken);
+        return jsonOk({ snapshot });
+      }
+      case "resumeGame": {
+        const snapshot = await resumeGame(code, action.actorToken);
         return jsonOk({ snapshot });
       }
       case "replay": {

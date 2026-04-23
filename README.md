@@ -7,7 +7,7 @@ Realtime multiplayer quiz duel MVP built with Next.js App Router and Tailwind CS
 This version is intentionally local-only and does not use any database provider.
 
 - Categories and questions are stored in [`data/question-bank.json`](/c:/Users/Dieter%20Holstein/OneDrive/Desktop/QuizDuel/QuizDuell/data/question-bank.json)
-- Active rooms, players, rounds, and scores are stored in the Next.js server process memory
+- Active rooms, players, rounds, and live match stats are stored in the Next.js server process memory
 - Browser clients stay in sync by polling the room APIs
 
 Important limitation:
@@ -22,13 +22,10 @@ Important limitation:
 - Lobby with live player list, host badge, kick controls, room code, and share link
 - Category and question CRUD with validation
 - Configurable game settings
-- Synced multiplayer gameplay with timed reveal phases
-- Leaderboard and replay flow
-- Demo categories:
-  - General Knowledge
-  - Movies
-  - Gaming
-  - Geography
+- Host-only duel pause and resume
+- Synced multiplayer gameplay with player-triggered next-question flow
+- Correct-answer leaderboard and replay flow
+- Built-in fishing-license question bank stored in `data/question-bank.json`
 
 ## Project Structure
 
@@ -49,7 +46,7 @@ hooks/
 lib/
   server/               Local file-backed content service and in-memory room engine
   validation.ts         Zod schemas
-  game.ts               Game helpers and scoring logic
+  game.ts               Game helpers and answer evaluation logic
 data/
   question-bank.json    Persistent categories and questions
 types/

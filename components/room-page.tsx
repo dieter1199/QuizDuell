@@ -8,6 +8,7 @@ import {
   Copy,
   Crown,
   DoorOpen,
+  Pause,
   Play,
   RefreshCcw,
   Settings2,
@@ -44,6 +45,29 @@ type RoomPageProps = {
 
 function formatLockStatusText(displayName: string, isCurrentPlayer: boolean) {
   return isCurrentPlayer ? "You locked in" : `${displayName} locked in`;
+}
+
+const CATEGORY_BADGE_CLASSES: Record<string, string> = {
+  "8450f627-c6ea-4c99-94fb-0ac3dbf3c01c":
+    "border-cyan-300/25 bg-cyan-400/12 text-cyan-100",
+  "ac075087-55b4-4150-9bb4-f29c351c4a93":
+    "border-emerald-300/25 bg-emerald-400/12 text-emerald-100",
+  "4288414e-55e1-40e0-97a6-8b63d559329e":
+    "border-orange-300/25 bg-orange-400/12 text-orange-100",
+  "03a3594d-bd75-43a6-a4ae-63f79aaab321":
+    "border-sky-300/25 bg-sky-400/12 text-sky-100",
+  "67371317-7dd7-48ad-9ee6-29cc33ceb1f0":
+    "border-violet-300/25 bg-violet-400/12 text-violet-100",
+  "eb817fe6-d403-4c80-abe4-bf1d1345aefb":
+    "border-rose-300/25 bg-rose-400/12 text-rose-100",
+};
+
+function getCategoryBadgeClass(categoryId?: string | null) {
+  return categoryId ? (CATEGORY_BADGE_CLASSES[categoryId] ?? "border-white/10 bg-white/6 text-slate-200") : "border-white/10 bg-white/6 text-slate-200";
+}
+
+function formatCorrectRatio(correctCount: number, answeredCount: number) {
+  return `${correctCount}/${answeredCount}`;
 }
 
 function AnswerChip({
@@ -126,6 +150,9 @@ export function RoomPage({ code }: RoomPageProps) {
   const isHost = Boolean(room.snapshot?.me?.is_host);
   const game = room.snapshot?.game;
   const currentRound = game?.currentRound;
+  const isGamePaused = Boolean(game?.session.is_paused);
+  const isQuestionPhase = game?.session.phase === "question";
+  const isRevealPhase = game?.session.phase === "reveal";
   const isLiveGame = Boolean(
     game && room.snapshot?.room.status === "active" && game.session.status === "active",
   );
@@ -141,24 +168,47 @@ export function RoomPage({ code }: RoomPageProps) {
 
     return currentRound.submissions.filter((submission) => !submission.timed_out);
   }, [currentRound, game?.session.phase]);
+  const categoryLookup = useMemo(
+    () => new Map((room.snapshot?.categories ?? []).map((category) => [category.id, category])),
+    [room.snapshot?.categories],
+  );
+  const currentCategory = currentRound ? categoryLookup.get(currentRound.question.category_id) ?? null : null;
   const roomLink = typeof window !== "undefined" ? `${window.location.origin}/room/${code}` : "";
   const activeGameId = game?.session.id ?? null;
   const activePhase = game?.session.phase ?? null;
   const activePhaseEndsAt = game?.session.phase_ends_at ?? null;
   const currentRoundId = currentRound?.round.id ?? null;
-  const phaseMsRemaining = game ? Math.max(0, new Date(game.session.phase_ends_at).getTime() - now) : 0;
+  const phaseMsRemaining = game && isQuestionPhase
+    ? game.session.is_paused
+      ? game.session.paused_ms_remaining ?? 0
+      : Math.max(0, new Date(game.session.phase_ends_at).getTime() - now)
+    : 0;
   const phaseSecondsRemaining = formatCountdown(phaseMsRemaining);
-  const phaseProgress = game
+  const phaseProgress = game && isQuestionPhase
     ? Math.max(
         0,
         Math.min(
           100,
-          (phaseMsRemaining /
-            (game.session.phase === "reveal" ? 3000 : game.session.settings.timerSeconds * 1000)) *
-            100,
+          (phaseMsRemaining / (game.session.settings.timerSeconds * 1000)) * 100,
         ),
       )
     : 0;
+  const selectedQuestionCount = useMemo(() => {
+    if (!settingsDraft || !room.snapshot?.categories) {
+      return 0;
+    }
+
+    return room.snapshot.categories
+      .filter((category) => settingsDraft.selectedCategoryIds.includes(category.id))
+      .reduce((count, category) => count + category.questions.length, 0);
+  }, [room.snapshot?.categories, settingsDraft]);
+  const plannedQuestionCount = settingsDraft?.useAllQuestions
+    ? selectedQuestionCount
+    : (settingsDraft?.questionCount ?? 20);
+  const isLastRound = Boolean(
+    game && game.session.current_round_number >= game.session.total_rounds,
+  );
+  const canAdvanceToNext = Boolean(game && isRevealPhase && !isGamePaused);
   const showQuickLinks = !game || game.session.status !== "active";
 
   useEffect(() => {
@@ -186,7 +236,7 @@ export function RoomPage({ code }: RoomPageProps) {
   }, [currentRound, room.snapshot?.me?.id, sounds]);
 
   const handleToggleAnswer = (displayIndex: number) => {
-    if (!game || game.session.phase !== "question" || hasSubmitted) {
+    if (!game || game.session.phase !== "question" || game.session.is_paused || hasSubmitted) {
       return;
     }
 
@@ -229,6 +279,42 @@ export function RoomPage({ code }: RoomPageProps) {
 
     await copyText(roomLink);
     setStatusMessage("Share link copied.");
+  };
+
+  const handlePauseToggle = async () => {
+    if (!room.snapshot?.me || !game) {
+      return;
+    }
+
+    try {
+      await room.roomAction({
+        action: isGamePaused ? "resumeGame" : "pauseGame",
+        actorToken: room.snapshot.me.player_token,
+      });
+      setStatusMessage(isGamePaused ? "Duel resumed." : "Duel paused.");
+    } catch (pauseError) {
+      setStatusMessage(
+        pauseError instanceof Error ? pauseError.message : "Unable to update the duel state.",
+      );
+    }
+  };
+
+  const handleAdvanceRound = async () => {
+    if (!room.snapshot?.me || !game) {
+      return;
+    }
+
+    try {
+      await room.gameAction({
+        action: "advance",
+        playerToken: room.snapshot.me.player_token,
+      });
+      setStatusMessage(isLastRound ? "Showing final results." : "Next question loaded.");
+    } catch (advanceError) {
+      setStatusMessage(
+        advanceError instanceof Error ? advanceError.message : "Unable to continue the duel.",
+      );
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -287,6 +373,7 @@ export function RoomPage({ code }: RoomPageProps) {
       !currentRoundId ||
       activePhase !== "question" ||
       !activePhaseEndsAt ||
+      isGamePaused ||
       hasSubmitted ||
       selectedIndexes.length === 0 ||
       !myPlayerToken
@@ -321,6 +408,7 @@ export function RoomPage({ code }: RoomPageProps) {
     currentRoundId,
     gameAction,
     hasSubmitted,
+    isGamePaused,
     myPlayerToken,
     playLockSound,
     selectedIndexes,
@@ -348,7 +436,7 @@ export function RoomPage({ code }: RoomPageProps) {
             <h1 className="mt-2 text-4xl font-semibold tracking-tight">Quiz room</h1>
             <p className="mt-2 text-sm text-slate-300">
               {room.snapshot?.room.status === "active"
-                ? "The duel is live. Answers and scores sync in realtime."
+                ? "The duel is live. Answers and rankings sync in realtime."
                 : "Configure the duel, manage the question bank, and start when everyone is ready."}
             </p>
           </div>
@@ -445,29 +533,83 @@ export function RoomPage({ code }: RoomPageProps) {
                   <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-start">
                     <div>
                       <div className="flex items-center gap-2">
-                        <Badge tone={game.session.phase === "question" ? "warm" : "cool"}>
-                          {game.session.phase === "question" ? "Question live" : "Reveal"}
+                        <Badge tone={isQuestionPhase ? "warm" : "cool"}>
+                          {isQuestionPhase ? "Question live" : "Reveal"}
                         </Badge>
+                        {isGamePaused ? <Badge tone="danger">Paused</Badge> : null}
                         <Badge tone="muted">
                           Round {game.session.current_round_number} / {game.session.total_rounds}
                         </Badge>
+                        {currentCategory ? (
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium tracking-wide",
+                              getCategoryBadgeClass(currentCategory.id),
+                            )}
+                          >
+                            {currentCategory.name}
+                          </span>
+                        ) : null}
                       </div>
                       <h2 className="mt-3 text-2xl font-semibold leading-tight md:text-3xl">
                         {currentRound?.question.prompt}
                       </h2>
                     </div>
-                    <div className="w-full max-w-[9rem] rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-left md:min-w-32 md:justify-self-end md:text-right">
-                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Timer</p>
-                      <p className="mt-1 text-3xl font-semibold md:text-4xl">{phaseSecondsRemaining}</p>
+                    <div className="grid gap-3 md:justify-self-end">
+                      <div className="w-full max-w-[9rem] rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-left md:min-w-32 md:text-right">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                          {isQuestionPhase ? "Timer" : "Continue"}
+                        </p>
+                        <p className="mt-1 text-3xl font-semibold md:text-4xl">
+                          {isGamePaused
+                            ? "Paused"
+                            : isQuestionPhase
+                              ? phaseSecondsRemaining
+                              : isLastRound
+                                ? "Finish"
+                                : "Ready"}
+                        </p>
+                        <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-300/80">
+                          {isGamePaused
+                            ? "Frozen"
+                            : isQuestionPhase
+                              ? "Live"
+                              : "Any player"}
+                        </p>
+                      </div>
+                      {isHost ? (
+                        <Button size="sm" variant={isGamePaused ? "secondary" : "ghost"} onClick={handlePauseToggle}>
+                          {isGamePaused ? (
+                            <Play className="mr-2 size-4" />
+                          ) : (
+                            <Pause className="mr-2 size-4" />
+                          )}
+                          {isGamePaused ? "Resume duel" : "Pause duel"}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
 
-                  <div className="h-3 overflow-hidden rounded-full bg-white/6">
-                    <div
-                      className="h-full rounded-full bg-[linear-gradient(90deg,#fb923c,#facc15)] transition-all"
-                      style={{ width: `${phaseProgress}%` }}
-                    />
-                  </div>
+                  {isQuestionPhase ? (
+                    <div className="h-3 overflow-hidden rounded-full bg-white/6">
+                      <div
+                        className="h-full rounded-full bg-[linear-gradient(90deg,#fb923c,#facc15)] transition-all"
+                        style={{ width: `${phaseProgress}%` }}
+                      />
+                    </div>
+                  ) : null}
+
+                  {isGamePaused ? (
+                    <div className="rounded-[24px] border border-rose-300/20 bg-rose-500/10 p-4 text-rose-50">
+                      <p className="text-xs uppercase tracking-[0.2em] text-rose-200/75">Paused</p>
+                      <p className="mt-2 text-sm">
+                        The host paused this {game.session.phase === "question" ? "question" : "reveal"}.
+                        {game.session.phase === "question"
+                          ? " Your current selection will stay ready until the duel resumes."
+                          : " The reveal will continue from the same remaining time after resume."}
+                      </p>
+                    </div>
+                  ) : null}
 
                   {lockedPlayers.length ? (
                     <div className="flex flex-wrap gap-2">
@@ -496,7 +638,7 @@ export function RoomPage({ code }: RoomPageProps) {
                         <AnswerChip
                           key={`${currentRound.round.id}-${answer.displayIndex}`}
                           selected={selected}
-                          disabled={revealed || hasSubmitted}
+                          disabled={revealed || hasSubmitted || isGamePaused}
                           correct={revealed ? answer.isCorrect : false}
                           onClick={() => handleToggleAnswer(answer.displayIndex)}
                         >
@@ -514,10 +656,12 @@ export function RoomPage({ code }: RoomPageProps) {
                   {game.session.phase === "question" ? (
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <div className="text-sm text-slate-300">
-                        Choose 1 or 2 answers. Full matches only score points, and selected answers auto-lock at 0.
+                        {isGamePaused
+                          ? "The host paused the duel. Your current selection is preserved, but answers stay locked until resume."
+                          : "Choose 1 or 2 answers. Exact matches count as correct, and selected answers auto-lock at 0."}
                       </div>
                       <Button
-                        disabled={selectedIndexes.length === 0 || hasSubmitted}
+                        disabled={isGamePaused || selectedIndexes.length === 0 || hasSubmitted}
                         onClick={async () => {
                           if (!room.snapshot?.me) {
                             return;
@@ -541,7 +685,7 @@ export function RoomPage({ code }: RoomPageProps) {
                         }}
                       >
                         <Play className="mr-2 size-4" />
-                        {hasSubmitted ? "Waiting..." : "Lock answer"}
+                        {isGamePaused ? "Paused" : hasSubmitted ? "Waiting..." : "Lock answer"}
                       </Button>
                     </div>
                   ) : (
@@ -565,15 +709,33 @@ export function RoomPage({ code }: RoomPageProps) {
                           >
                             <div className="flex items-center justify-between gap-3">
                               <span className="font-medium">{submission.displayName}</span>
-                              <Badge tone={submission.is_correct ? "warm" : "muted"}>
-                                {submission.is_correct ? `+${submission.points_awarded}` : "0"}
+                              <Badge tone={submission.is_correct ? "warm" : submission.timed_out ? "danger" : "muted"}>
+                                {submission.timed_out ? "Timed out" : submission.is_correct ? "Correct" : "Wrong"}
                               </Badge>
                             </div>
                             <p className="mt-2 text-sm text-slate-300">
-                              {submission.timed_out ? "Timed out" : submission.is_correct ? "Full match" : "Missed"}
+                              {submission.timed_out
+                                ? "No answer was locked in before time ran out."
+                                : submission.is_correct
+                                  ? "This answer matched the correct choices."
+                                  : "This answer missed the correct choices."}
                             </p>
                           </div>
                         ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/10 bg-white/5 px-4 py-4">
+                        <p className="text-sm text-slate-300">
+                          {isGamePaused
+                            ? "The host paused the reveal. The next question stays locked until the duel resumes."
+                            : isLastRound
+                              ? "Any player can open the final results."
+                              : "Any player can continue to the next question."}
+                        </p>
+                        <Button disabled={!canAdvanceToNext} onClick={handleAdvanceRound}>
+                          <Play className="mr-2 size-4" />
+                          {isLastRound ? "Show results" : "Next question"}
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -598,24 +760,45 @@ export function RoomPage({ code }: RoomPageProps) {
                     <div className="grid gap-4 md:grid-cols-3">
                       <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
                         <p className="text-sm text-slate-300">Questions</p>
-                        <p className="mt-2 text-3xl font-semibold">{settingsDraft?.questionCount ?? 20}</p>
+                        <p className="mt-2 text-3xl font-semibold">{plannedQuestionCount}</p>
+                        {settingsDraft?.useAllQuestions ? (
+                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">All selected</p>
+                        ) : null}
                       </div>
                       <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
                         <p className="text-sm text-slate-300">Timer</p>
                         <p className="mt-2 text-3xl font-semibold">{settingsDraft?.timerSeconds ?? 10}s</p>
                       </div>
                       <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                        <p className="text-sm text-slate-300">Points</p>
-                        <p className="mt-2 text-3xl font-semibold">{settingsDraft?.pointsPerQuestion ?? 10}</p>
+                        <p className="text-sm text-slate-300">Question source</p>
+                        <p className="mt-2 text-3xl font-semibold">
+                          {settingsDraft?.useAllQuestions ? "All" : "Manual"}
+                        </p>
                       </div>
                     </div>
 
                     {isHost && settingsDraft ? (
                       <div className="grid gap-4 lg:grid-cols-2">
                         <label className="block text-sm text-slate-200">
-                          <span className="mb-2 block">Number of questions</span>
+                          <span className="mb-2 flex items-center justify-between gap-3">
+                            <span>Number of questions</span>
+                            <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                              <input
+                                checked={settingsDraft.useAllQuestions}
+                                type="checkbox"
+                                onChange={(event) =>
+                                  updateSettingsDraftLocally((current) => ({
+                                    ...current,
+                                    useAllQuestions: event.target.checked,
+                                  }))
+                                }
+                              />
+                              All selected
+                            </span>
+                          </span>
                           <Input
-                            min={5}
+                            disabled={settingsDraft.useAllQuestions}
+                            min={1}
                             max={30}
                             type="number"
                             value={settingsDraft.questionCount}
@@ -638,21 +821,6 @@ export function RoomPage({ code }: RoomPageProps) {
                               updateSettingsDraftLocally((current) => ({
                                 ...current,
                                 timerSeconds: Number(event.target.value || 10),
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="block text-sm text-slate-200">
-                          <span className="mb-2 block">Points per question</span>
-                          <Input
-                            min={5}
-                            max={50}
-                            type="number"
-                            value={settingsDraft.pointsPerQuestion}
-                            onChange={(event) =>
-                              updateSettingsDraftLocally((current) => ({
-                                ...current,
-                                pointsPerQuestion: Number(event.target.value || 10),
                               }))
                             }
                           />
@@ -823,7 +991,13 @@ export function RoomPage({ code }: RoomPageProps) {
                     <div className="rounded-[24px] border border-amber-300/25 bg-amber-400/12 p-5">
                       <p className="text-xs uppercase tracking-[0.2em] text-amber-100/70">Winner</p>
                       <p className="mt-2 text-3xl font-semibold">{game.leaderboard[0].displayName}</p>
-                      <p className="mt-2 text-sm text-amber-50">{game.leaderboard[0].score} points</p>
+                      <p className="mt-2 text-sm text-amber-50">
+                        {formatCorrectRatio(
+                          game.leaderboard[0].correctCount,
+                          game.leaderboard[0].answeredCount,
+                        )}{" "}
+                        correct
+                      </p>
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-3">
@@ -888,7 +1062,11 @@ export function RoomPage({ code }: RoomPageProps) {
                           <Badge tone={player.connection_status === "online" ? "cool" : "danger"}>
                             {player.connection_status}
                           </Badge>
-                          {game ? <Badge tone="muted">{player.score} pts</Badge> : null}
+                          {game ? (
+                            <Badge tone="muted">
+                              {formatCorrectRatio(player.correctCount, player.answeredCount)} correct
+                            </Badge>
+                          ) : null}
                         </div>
                       </div>
                       {isHost && !player.is_host ? (
@@ -931,7 +1109,8 @@ export function RoomPage({ code }: RoomPageProps) {
                     activePlayers.map((player) => ({
                       playerId: player.id,
                       displayName: player.display_name,
-                      score: 0,
+                      correctCount: 0,
+                      answeredCount: 0,
                       isHost: player.is_host,
                       status: player.status,
                       connectionStatus: player.connection_status,
@@ -954,7 +1133,9 @@ export function RoomPage({ code }: RoomPageProps) {
                             </p>
                           </div>
                         </div>
-                        <p className="text-lg font-semibold">{entry.score}</p>
+                        <p className="text-lg font-semibold">
+                          {formatCorrectRatio(entry.correctCount, entry.answeredCount)}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -970,9 +1151,21 @@ export function RoomPage({ code }: RoomPageProps) {
                       <TimerReset className="size-5 text-sky-200" />
                     )}
                     <h2 className="text-xl font-semibold">Round status</h2>
+                    {isGamePaused ? <Badge tone="danger">Paused</Badge> : null}
                   </div>
+                  {isGamePaused ? (
+                    <p className="text-sm text-slate-300">
+                      {isQuestionPhase
+                        ? `The host paused this question with ${phaseSecondsRemaining}s remaining.`
+                        : "The host paused the reveal before the next question could start."}
+                    </p>
+                  ) : null}
                   <p className="text-sm text-slate-300">
-                    {game.submittedAnswerCount} / {game.requiredAnswerCount} active players have submitted.
+                    {isQuestionPhase
+                      ? `${game.submittedAnswerCount} / ${game.requiredAnswerCount} active players have submitted.`
+                      : isLastRound
+                        ? "The final answers are in. Any player can open the results."
+                        : "The answers are revealed. Any player can continue to the next question."}
                   </p>
                 </Card>
               ) : null}

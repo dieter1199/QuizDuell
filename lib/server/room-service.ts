@@ -4,10 +4,9 @@ import { PLAYER_STALE_AFTER_MS } from "@/lib/constants";
 import {
   buildRoundAnswers,
   createAnswerOrder,
+  evaluateSelection,
   getCorrectDisplayIndexes,
-  nextRevealIso,
   normalizeRoomSettings,
-  scoreSelection,
   shuffleArray,
 } from "@/lib/game";
 import { ApiError } from "@/lib/server/api";
@@ -47,6 +46,23 @@ function touchRoom(room: StoredRoom) {
   room.updated_at = nowIso();
 }
 
+function remainingMsUntil(isoDate: string) {
+  return Math.max(0, new Date(isoDate).getTime() - Date.now());
+}
+
+function futureIsoFromNow(msFromNow: number) {
+  return new Date(Date.now() + Math.max(0, msFromNow)).toISOString();
+}
+
+function clearPauseState(room: StoredRoom) {
+  if (!room.game) {
+    return;
+  }
+
+  room.game.is_paused = false;
+  room.game.paused_ms_remaining = null;
+}
+
 function getPlayersForRoom(room: StoredRoom) {
   return [...room.players].sort(
     (left, right) =>
@@ -57,6 +73,16 @@ function getPlayersForRoom(room: StoredRoom) {
 
 function getPlayerByToken(room: StoredRoom, playerToken: string) {
   return room.players.find((player) => player.player_token === playerToken) ?? null;
+}
+
+function assertActivePlayer(room: StoredRoom, playerToken: string) {
+  const player = getPlayerByToken(room, playerToken);
+
+  if (!player || player.status !== "active") {
+    throw new ApiError(403, "You are no longer an active player in this room.");
+  }
+
+  return player;
 }
 
 function getUniqueDisplayName(room: StoredRoom, requestedName: string, excludedPlayerId?: string) {
@@ -91,6 +117,7 @@ function closeRoom(room: StoredRoom, reason: string) {
   if (room.game && room.game.status === "active") {
     room.game.status = "cancelled";
     room.game.phase = "finished";
+    clearPauseState(room);
     room.game.ended_at = nowIso();
   }
 }
@@ -115,12 +142,18 @@ function reconcileRoomPresence(room: StoredRoom) {
   }
 }
 
-async function maybeAdvanceGame(room: StoredRoom) {
+async function maybeAdvanceGame(room: StoredRoom, options?: { advanceReveal?: boolean }) {
   if (!room.game || room.game.status !== "active" || room.game.phase === "finished") {
     return room.game ?? null;
   }
 
   const game = room.game;
+  const advanceReveal = options?.advanceReveal ?? false;
+
+  if (game.is_paused) {
+    return game;
+  }
+
   const categories = await getCategoryBank();
   const currentRound =
     game.rounds.find((round) => round.round_number === game.current_round_number) ?? null;
@@ -161,25 +194,26 @@ async function maybeAdvanceGame(room: StoredRoom) {
         selected_indexes: [],
         is_correct: false,
         timed_out: true,
-        points_awarded: 0,
         submitted_at: nowIso(),
       });
     }
 
     game.phase = "reveal";
+    clearPauseState(room);
     game.phase_started_at = now.toISOString();
-    game.phase_ends_at = nextRevealIso(now.toISOString());
+    game.phase_ends_at = now.toISOString();
     touchRoom(room);
     return game;
   }
 
-  if (now < phaseEndsAt) {
+  if (!advanceReveal || now < phaseEndsAt) {
     return game;
   }
 
   if (game.current_round_number >= game.total_rounds) {
     game.status = "finished";
     game.phase = "finished";
+    clearPauseState(room);
     game.ended_at = now.toISOString();
     room.status = "lobby";
     touchRoom(room);
@@ -188,6 +222,7 @@ async function maybeAdvanceGame(room: StoredRoom) {
 
   game.current_round_number += 1;
   game.phase = "question";
+  clearPauseState(room);
   game.phase_started_at = now.toISOString();
   game.phase_ends_at = new Date(
     now.getTime() + game.settings.timerSeconds * 1000,
@@ -197,15 +232,19 @@ async function maybeAdvanceGame(room: StoredRoom) {
   return game;
 }
 
-function buildPlayersWithScores(
+function buildPlayersWithResults(
   players: RoomPlayerRow[],
   answers: PlayerAnswerRow[],
   currentRoundId?: string,
 ) {
-  const scoreMap = new Map<string, number>();
+  const statMap = new Map<string, { correctCount: number; answeredCount: number }>();
 
   for (const answer of answers) {
-    scoreMap.set(answer.player_id, (scoreMap.get(answer.player_id) ?? 0) + answer.points_awarded);
+    const current = statMap.get(answer.player_id) ?? { correctCount: 0, answeredCount: 0 };
+
+    current.answeredCount += 1;
+    current.correctCount += Number(answer.is_correct);
+    statMap.set(answer.player_id, current);
   }
 
   const answeredCurrentRoundIds = new Set(
@@ -214,23 +253,30 @@ function buildPlayersWithScores(
 
   return players.map<RoomPlayerSnapshot>((player) => ({
     ...player,
-    score: scoreMap.get(player.id) ?? 0,
+    correctCount: statMap.get(player.id)?.correctCount ?? 0,
+    answeredCount: statMap.get(player.id)?.answeredCount ?? 0,
     answeredCurrentRound: answeredCurrentRoundIds.has(player.id),
   }));
 }
 
 function buildLeaderboard(players: RoomPlayerSnapshot[]): LeaderboardEntry[] {
   return players
-    .filter((player) => player.status === "active" || player.score > 0)
+    .filter((player) => player.status === "active" || player.answeredCount > 0)
     .map((player) => ({
       playerId: player.id,
       displayName: player.display_name,
-      score: player.score,
+      correctCount: player.correctCount,
+      answeredCount: player.answeredCount,
       isHost: player.is_host,
       status: player.status,
       connectionStatus: player.connection_status,
     }))
-    .sort((left, right) => right.score - left.score || Number(right.isHost) - Number(left.isHost));
+    .sort(
+      (left, right) =>
+        right.correctCount - left.correctCount ||
+        left.answeredCount - right.answeredCount ||
+        Number(right.isHost) - Number(left.isHost),
+    );
 }
 
 async function buildSnapshot(room: StoredRoom, playerToken?: string) {
@@ -249,7 +295,8 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
   if (!room.game) {
     const lobbyPlayers = players.map<RoomPlayerSnapshot>((player) => ({
       ...player,
-      score: 0,
+      correctCount: 0,
+      answeredCount: 0,
       answeredCurrentRound: false,
     }));
 
@@ -268,18 +315,18 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
   const currentQuestion = currentRound
     ? categories.flatMap((category) => category.questions).find((question) => question.id === currentRound.question_id) ?? null
     : null;
-  const playersWithScores = buildPlayersWithScores(players, game.answers, currentRound?.id);
+  const playersWithResults = buildPlayersWithResults(players, game.answers, currentRound?.id);
   const submissions = currentRound
     ? game.answers.filter((answer) => answer.round_id === currentRound.id)
     : [];
-  const playerLookup = new Map(playersWithScores.map((player) => [player.id, player]));
+  const playerLookup = new Map(playersWithResults.map((player) => [player.id, player]));
 
   return {
     room: roomRecord,
     me: playerToken
-      ? playersWithScores.find((player) => player.player_token === playerToken) ?? null
+      ? playersWithResults.find((player) => player.player_token === playerToken) ?? null
       : null,
-    players: playersWithScores,
+    players: playersWithResults,
     categories,
     game: {
       session: {
@@ -287,6 +334,8 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
         room_id: game.room_id,
         status: game.status,
         phase: game.phase,
+        is_paused: game.is_paused,
+        paused_ms_remaining: game.paused_ms_remaining,
         current_round_number: game.current_round_number,
         total_rounds: game.total_rounds,
         settings: structuredClone(game.settings),
@@ -308,9 +357,9 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
               })),
             }
           : null,
-      leaderboard: buildLeaderboard(playersWithScores),
+      leaderboard: buildLeaderboard(playersWithResults),
       submittedAnswerCount: submissions.length,
-      requiredAnswerCount: playersWithScores.filter((player) => player.status === "active").length,
+      requiredAnswerCount: playersWithResults.filter((player) => player.status === "active").length,
     },
   } satisfies RoomSnapshot;
 }
@@ -554,7 +603,11 @@ export async function startGame(roomCode: string, actorToken: string) {
     throw new ApiError(400, "Select at least one category.");
   }
 
-  if (selectedQuestions.length < settings.questionCount) {
+  if (!selectedQuestions.length) {
+    throw new ApiError(400, "No questions are available for the selected categories.");
+  }
+
+  if (!settings.useAllQuestions && selectedQuestions.length < settings.questionCount) {
     throw new ApiError(
       400,
       `Only ${selectedQuestions.length} questions are available for the selected categories.`,
@@ -570,7 +623,9 @@ export async function startGame(roomCode: string, actorToken: string) {
   const orderedQuestions = settings.randomizeQuestionOrder
     ? shuffleArray(selectedQuestions)
     : [...selectedQuestions].sort((left, right) => left.created_at.localeCompare(right.created_at));
-  const questionsForGame = orderedQuestions.slice(0, settings.questionCount);
+  const questionsForGame = settings.useAllQuestions
+    ? orderedQuestions
+    : orderedQuestions.slice(0, settings.questionCount);
   const timestamp = nowIso();
   const gameId = crypto.randomUUID();
 
@@ -579,6 +634,8 @@ export async function startGame(roomCode: string, actorToken: string) {
     room_id: room.id,
     status: "active",
     phase: "question",
+    is_paused: false,
+    paused_ms_remaining: null,
     current_round_number: 1,
     total_rounds: questionsForGame.length,
     settings: structuredClone(settings),
@@ -615,6 +672,10 @@ export async function submitAnswer(gameId: string, playerToken: string, selected
 
   const game = room.game;
 
+  if (game.is_paused) {
+    throw new ApiError(409, "This duel is currently paused.");
+  }
+
   if (game.status !== "active" || game.phase !== "question") {
     throw new ApiError(409, "This question is already locked.");
   }
@@ -625,11 +686,7 @@ export async function submitAnswer(gameId: string, playerToken: string, selected
     throw new ApiError(500, "The current round could not be found.");
   }
 
-  const player = getPlayerByToken(room, playerToken);
-
-  if (!player || player.status !== "active") {
-    throw new ApiError(403, "You are no longer an active player in this room.");
-  }
+  const player = assertActivePlayer(room, playerToken);
 
   if (game.answers.some((answer) => answer.round_id === currentRound.id && answer.player_id === player.id)) {
     throw new ApiError(409, "Your answer is already locked in.");
@@ -644,11 +701,10 @@ export async function submitAnswer(gameId: string, playerToken: string, selected
     throw new ApiError(500, "The current question could not be found.");
   }
 
-  const scoring = scoreSelection(
+  const scoring = evaluateSelection(
     selectedIndexes,
     question,
     currentRound.answer_order,
-    game.settings.pointsPerQuestion,
   );
 
   game.answers.push({
@@ -658,7 +714,6 @@ export async function submitAnswer(gameId: string, playerToken: string, selected
     selected_indexes: scoring.normalizedSelection,
     is_correct: scoring.isCorrect,
     timed_out: false,
-    points_awarded: scoring.pointsAwarded,
     submitted_at: nowIso(),
   });
   touchRoom(room);
@@ -675,13 +730,57 @@ export async function advanceGame(gameId: string, playerToken?: string) {
     throw new ApiError(404, "This room no longer exists.");
   }
 
-  const game = await maybeAdvanceGame(room);
+  if (playerToken) {
+    assertActivePlayer(room, playerToken);
+  } else if (room.game?.phase === "reveal") {
+    throw new ApiError(400, "An active player is required to continue from the reveal.");
+  }
+
+  const game = await maybeAdvanceGame(room, { advanceReveal: room.game?.phase === "reveal" });
 
   if (!game) {
     throw new ApiError(404, "This duel does not exist.");
   }
 
   return buildSnapshot(room, playerToken);
+}
+
+export async function pauseGame(roomCode: string, actorToken: string) {
+  const { room } = await assertHost(roomCode, actorToken);
+  const game = room.game;
+
+  if (!game || game.status !== "active" || game.phase === "finished") {
+    throw new ApiError(409, "There is no active duel to pause.");
+  }
+
+  if (game.is_paused) {
+    throw new ApiError(409, "This duel is already paused.");
+  }
+
+  game.is_paused = true;
+  game.paused_ms_remaining = remainingMsUntil(game.phase_ends_at);
+  touchRoom(room);
+
+  return buildSnapshot(room, actorToken);
+}
+
+export async function resumeGame(roomCode: string, actorToken: string) {
+  const { room } = await assertHost(roomCode, actorToken);
+  const game = room.game;
+
+  if (!game || game.status !== "active" || game.phase === "finished") {
+    throw new ApiError(409, "There is no active duel to resume.");
+  }
+
+  if (!game.is_paused) {
+    throw new ApiError(409, "This duel is not paused.");
+  }
+
+  game.phase_ends_at = futureIsoFromNow(game.paused_ms_remaining ?? 0);
+  clearPauseState(room);
+  touchRoom(room);
+
+  return buildSnapshot(room, actorToken);
 }
 
 export async function replayRoom(roomCode: string, actorToken: string) {

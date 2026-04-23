@@ -1,4 +1,4 @@
-import { DEFAULT_ROOM_SETTINGS, ROOM_REVEAL_DURATION_SECONDS } from "@/lib/constants";
+import { DEFAULT_ROOM_SETTINGS } from "@/lib/constants";
 import { arraysEqual, sortNumberArray } from "@/lib/utils";
 import type { QuestionRecord, RoomSettings, RoundAnswerOption } from "@/types/app";
 
@@ -20,12 +20,12 @@ export function normalizeRoomSettings(
   return {
     questionCount:
       typeof candidate.questionCount === "number" ? candidate.questionCount : base.questionCount,
+    useAllQuestions:
+      typeof candidate.useAllQuestions === "boolean"
+        ? candidate.useAllQuestions
+        : base.useAllQuestions,
     timerSeconds:
       typeof candidate.timerSeconds === "number" ? candidate.timerSeconds : base.timerSeconds,
-    pointsPerQuestion:
-      typeof candidate.pointsPerQuestion === "number"
-        ? candidate.pointsPerQuestion
-        : base.pointsPerQuestion,
     selectedCategoryIds:
       Array.isArray(candidate.selectedCategoryIds) && candidate.selectedCategoryIds.length
         ? candidate.selectedCategoryIds.filter((entry): entry is string => typeof entry === "string")
@@ -71,11 +71,10 @@ export function getCorrectDisplayIndexes(question: QuestionRecord, answerOrder: 
   );
 }
 
-export function scoreSelection(
+export function evaluateSelection(
   selectedIndexes: number[],
   question: QuestionRecord,
   answerOrder: number[],
-  pointsPerQuestion: number,
 ) {
   const normalizedSelection = sortNumberArray(selectedIndexes);
   const correctDisplayIndexes = getCorrectDisplayIndexes(question, answerOrder);
@@ -85,7 +84,6 @@ export function scoreSelection(
     normalizedSelection,
     correctDisplayIndexes,
     isCorrect,
-    pointsAwarded: isCorrect ? pointsPerQuestion : 0,
   };
 }
 
@@ -96,12 +94,4 @@ export function buildRoundAnswers(question: QuestionRecord, answerOrder: number[
     text: question.answers[sourceIndex],
     isCorrect: question.correct_answer_indexes.includes(sourceIndex),
   }));
-}
-
-export function addSecondsToIso(isoDate: string, seconds: number) {
-  return new Date(new Date(isoDate).getTime() + seconds * 1000).toISOString();
-}
-
-export function nextRevealIso(fromIso: string) {
-  return addSecondsToIso(fromIso, ROOM_REVEAL_DURATION_SECONDS);
 }

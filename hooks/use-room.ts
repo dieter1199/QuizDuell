@@ -121,7 +121,12 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
   }, [applySnapshot, roomPath, snapshot?.me]);
 
   useEffect(() => {
-    if (!snapshot?.game || snapshot.game.session.phase === "finished") {
+    if (
+      !snapshot?.game ||
+      snapshot.game.session.phase === "finished" ||
+      snapshot.game.session.phase !== "question" ||
+      snapshot.game.session.is_paused
+    ) {
       return;
     }
 

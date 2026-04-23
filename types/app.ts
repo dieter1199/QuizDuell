@@ -7,8 +7,8 @@ export type GameStatus = "active" | "finished" | "cancelled";
 
 export type RoomSettings = {
   questionCount: number;
+  useAllQuestions: boolean;
   timerSeconds: number;
-  pointsPerQuestion: number;
   selectedCategoryIds: string[];
   randomizeQuestionOrder: boolean;
   randomizeAnswerOrder: boolean;
@@ -65,6 +65,8 @@ export type GameSessionRecord = {
   room_id: string;
   status: GameStatus;
   phase: GamePhase;
+  is_paused: boolean;
+  paused_ms_remaining: number | null;
   current_round_number: number;
   total_rounds: number;
   settings: RoomSettings;
@@ -90,7 +92,6 @@ export type PlayerAnswerRow = {
   selected_indexes: number[];
   is_correct: boolean;
   timed_out: boolean;
-  points_awarded: number;
   submitted_at: string;
 };
 
@@ -120,14 +121,16 @@ export type RoundSnapshot = {
 export type LeaderboardEntry = {
   playerId: string;
   displayName: string;
-  score: number;
+  correctCount: number;
+  answeredCount: number;
   isHost: boolean;
   status: PlayerStatus;
   connectionStatus: PlayerConnectionStatus;
 };
 
 export type RoomPlayerSnapshot = RoomPlayerRow & {
-  score: number;
+  correctCount: number;
+  answeredCount: number;
   answeredCurrentRound: boolean;
 };
 
