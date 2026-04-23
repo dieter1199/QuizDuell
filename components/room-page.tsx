@@ -31,9 +31,14 @@ import { useProfile } from "@/hooks/use-profile";
 import { useQuizSounds } from "@/hooks/use-quiz-sounds";
 import { useRoom } from "@/hooks/use-room";
 import { requestJson } from "@/lib/fetcher";
-import { cn, copyText, formatCountdown } from "@/lib/utils";
+import { cn, copyText, formatCountdown, sortNumberArray } from "@/lib/utils";
 import { roomSettingsSchema } from "@/lib/validation";
-import type { CategoryWithQuestions, QuestionInput, RoomSettings } from "@/types/app";
+import type {
+  CategoryWithQuestions,
+  PlayerGameReview,
+  QuestionInput,
+  RoomSettings,
+} from "@/types/app";
 
 type CategoryBankResponse = {
   categories: CategoryWithQuestions[];
@@ -103,6 +108,72 @@ function AnswerChip({
   );
 }
 
+function SmoothQuestionTimerBar({
+  phaseEndsAt,
+  pausedMsRemaining,
+  paused,
+  roundId,
+  timerSeconds,
+}: {
+  phaseEndsAt: string;
+  pausedMsRemaining: number | null;
+  paused: boolean;
+  roundId: string;
+  timerSeconds: number;
+}) {
+  const barRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const barElement = barRef.current;
+
+    if (!barElement) {
+      return;
+    }
+
+    const remainingMs = paused
+      ? Math.max(0, pausedMsRemaining ?? 0)
+      : Math.max(0, new Date(phaseEndsAt).getTime() - Date.now());
+    const nextProgress = timerSeconds > 0
+      ? Math.min(1, Math.max(0, remainingMs / (timerSeconds * 1000)))
+      : 0;
+    let frameId: number | null = null;
+
+    barElement.style.transitionDuration = "0ms";
+    barElement.style.transform = `scaleX(${nextProgress})`;
+
+    if (!paused && remainingMs > 0) {
+      frameId = window.requestAnimationFrame(() => {
+        if (!barRef.current) {
+          return;
+        }
+
+        barRef.current.style.transitionDuration = `${remainingMs}ms`;
+        barRef.current.style.transform = "scaleX(0)";
+      });
+    }
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [paused, pausedMsRemaining, phaseEndsAt, roundId, timerSeconds]);
+
+  return (
+    <div className="h-3 overflow-hidden rounded-full bg-white/6">
+      <div
+        ref={barRef}
+        className="h-full origin-left rounded-full bg-[linear-gradient(90deg,#fb923c,#facc15)] transition-[transform] will-change-transform"
+        style={{
+          transform: "scaleX(1)",
+          transitionDuration: "0ms",
+          transitionTimingFunction: "linear",
+        }}
+      />
+    </div>
+  );
+}
+
 export function RoomPage({ code }: RoomPageProps) {
   const router = useRouter();
   const { profile, ready, hasDisplayName, saveProfile } = useProfile();
@@ -110,6 +181,8 @@ export function RoomPage({ code }: RoomPageProps) {
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
+  const [showWrongQuestions, setShowWrongQuestions] = useState(false);
+  const [selectedReviewPlayerId, setSelectedReviewPlayerId] = useState<string | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<RoomSettings | null>(null);
   const [isSettingsDraftDirty, setIsSettingsDraftDirty] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -184,15 +257,6 @@ export function RoomPage({ code }: RoomPageProps) {
       : Math.max(0, new Date(game.session.phase_ends_at).getTime() - now)
     : 0;
   const phaseSecondsRemaining = formatCountdown(phaseMsRemaining);
-  const phaseProgress = game && isQuestionPhase
-    ? Math.max(
-        0,
-        Math.min(
-          100,
-          (phaseMsRemaining / (game.session.settings.timerSeconds * 1000)) * 100,
-        ),
-      )
-    : 0;
   const selectedQuestionCount = useMemo(() => {
     if (!settingsDraft || !room.snapshot?.categories) {
       return 0;
@@ -210,6 +274,62 @@ export function RoomPage({ code }: RoomPageProps) {
   );
   const canAdvanceToNext = Boolean(game && isRevealPhase && !isGamePaused);
   const showQuickLinks = !game || game.session.status !== "active";
+  const orderedReviewPlayers = useMemo(() => {
+    if (!game) {
+      return [];
+    }
+
+    const reviewLookup = new Map(
+      game.playerReviews.map((review) => [review.playerId, review] as const),
+    );
+    const ordered: PlayerGameReview[] = [];
+
+    for (const leaderboardEntry of game.leaderboard) {
+      const review = reviewLookup.get(leaderboardEntry.playerId);
+
+      if (!review) {
+        continue;
+      }
+
+      ordered.push(review);
+      reviewLookup.delete(leaderboardEntry.playerId);
+    }
+
+    return [...ordered, ...reviewLookup.values()];
+  }, [game]);
+  const reviewCategoryRows = useMemo(() => {
+    const categoryLookup = new Map<string, { categoryId: string; categoryName: string }>();
+
+    for (const review of orderedReviewPlayers) {
+      for (const stat of review.categoryStats) {
+        if (!categoryLookup.has(stat.categoryId)) {
+          categoryLookup.set(stat.categoryId, {
+            categoryId: stat.categoryId,
+            categoryName: stat.categoryName,
+          });
+        }
+      }
+    }
+
+    return [...categoryLookup.values()];
+  }, [orderedReviewPlayers]);
+  const reviewStatLookup = useMemo(
+    () =>
+      new Map(
+        orderedReviewPlayers.map((review) => [
+          review.playerId,
+          new Map(review.categoryStats.map((stat) => [stat.categoryId, stat] as const)),
+        ]),
+      ),
+    [orderedReviewPlayers],
+  );
+  const selectedReviewPlayer = useMemo(
+    () =>
+      orderedReviewPlayers.find((review) => review.playerId === selectedReviewPlayerId) ??
+      orderedReviewPlayers[0] ??
+      null,
+    [orderedReviewPlayers, selectedReviewPlayerId],
+  );
 
   useEffect(() => {
     if (!currentRound) {
@@ -235,23 +355,52 @@ export function RoomPage({ code }: RoomPageProps) {
     seenSubmissionIdsRef.current = nextSubmissionIds;
   }, [currentRound, room.snapshot?.me?.id, sounds]);
 
+  useEffect(() => {
+    if (!game || game.session.status !== "finished") {
+      setShowWrongQuestions(false);
+      setSelectedReviewPlayerId(null);
+      return;
+    }
+
+    const myPlayerId = room.snapshot?.me?.id ?? null;
+
+    setSelectedReviewPlayerId((current) => {
+      if (current && orderedReviewPlayers.some((review) => review.playerId === current)) {
+        return current;
+      }
+
+      if (myPlayerId && orderedReviewPlayers.some((review) => review.playerId === myPlayerId)) {
+        return myPlayerId;
+      }
+
+      return orderedReviewPlayers[0]?.playerId ?? null;
+    });
+  }, [game, orderedReviewPlayers, room.snapshot?.me?.id]);
+
   const handleToggleAnswer = (displayIndex: number) => {
     if (!game || game.session.phase !== "question" || game.session.is_paused || hasSubmitted) {
       return;
     }
 
-    if (selectedIndexes.includes(displayIndex)) {
-      setSelectedIndexes(selectedIndexes.filter((item) => item !== displayIndex));
+    let didUpdateSelection = false;
+
+    setSelectedIndexes((current) => {
+      if (current.includes(displayIndex)) {
+        didUpdateSelection = true;
+        return current.filter((item) => item !== displayIndex);
+      }
+
+      if (current.length >= 2) {
+        return current;
+      }
+
+      didUpdateSelection = true;
+      return sortNumberArray([...current, displayIndex]);
+    });
+
+    if (didUpdateSelection) {
       sounds.playSelectSound();
-      return;
     }
-
-    if (selectedIndexes.length >= 2) {
-      return;
-    }
-
-    setSelectedIndexes([...selectedIndexes, displayIndex]);
-    sounds.playSelectSound();
   };
 
   const updateSettingsDraftLocally = (updater: (current: RoomSettings) => RoomSettings) => {
@@ -590,13 +739,14 @@ export function RoomPage({ code }: RoomPageProps) {
                     </div>
                   </div>
 
-                  {isQuestionPhase ? (
-                    <div className="h-3 overflow-hidden rounded-full bg-white/6">
-                      <div
-                        className="h-full rounded-full bg-[linear-gradient(90deg,#fb923c,#facc15)] transition-all"
-                        style={{ width: `${phaseProgress}%` }}
-                      />
-                    </div>
+                  {isQuestionPhase && currentRound ? (
+                    <SmoothQuestionTimerBar
+                      paused={isGamePaused}
+                      pausedMsRemaining={game.session.paused_ms_remaining}
+                      phaseEndsAt={game.session.phase_ends_at}
+                      roundId={currentRound.round.id}
+                      timerSeconds={game.session.settings.timerSeconds}
+                    />
                   ) : null}
 
                   {isGamePaused ? (
@@ -611,22 +761,38 @@ export function RoomPage({ code }: RoomPageProps) {
                     </div>
                   ) : null}
 
-                  {lockedPlayers.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {lockedPlayers.map((submission) => (
-                        <div
-                          key={submission.id}
-                          className="inline-flex max-w-full items-center gap-2 rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-1 text-xs font-medium text-sky-50"
-                        >
-                          <span className="size-2 rounded-full bg-sky-200" />
-                          <span className="truncate">
-                            {formatLockStatusText(
-                              submission.displayName,
-                              submission.player_id === room.snapshot?.me?.id,
-                            )}
-                          </span>
-                        </div>
-                      ))}
+                  {isQuestionPhase ? (
+                    <div className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Locked in</p>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-300/80">
+                          {lockedPlayers.length} / {game.requiredAnswerCount}
+                        </p>
+                      </div>
+                      <div className="mt-3 min-h-[2.75rem]">
+                        {lockedPlayers.length ? (
+                          <div className="flex flex-wrap gap-2">
+                            {lockedPlayers.map((submission) => (
+                              <div
+                                key={submission.id}
+                                className="inline-flex max-w-full items-center gap-2 rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-1 text-xs font-medium text-sky-50"
+                              >
+                                <span className="size-2 rounded-full bg-sky-200" />
+                                <span className="truncate">
+                                  {formatLockStatusText(
+                                    submission.displayName,
+                                    submission.player_id === room.snapshot?.me?.id,
+                                  )}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="flex min-h-[2.75rem] items-center text-sm text-slate-400">
+                            Waiting for the first player to lock in.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ) : null}
 
@@ -979,60 +1145,232 @@ export function RoomPage({ code }: RoomPageProps) {
               ) : null}
 
               {game?.session.status === "finished" && room.snapshot?.room.status === "lobby" ? (
-                <Card className="space-y-5">
-                  <div className="flex items-center gap-3">
-                    <Trophy className="size-8 text-amber-200" />
-                    <div>
-                      <h2 className="text-3xl font-semibold">Duel finished</h2>
-                      <p className="text-slate-300">The final leaderboard is locked in.</p>
+                <>
+                  <Card className="space-y-5">
+                    <div className="flex items-center gap-3">
+                      <Trophy className="size-8 text-amber-200" />
+                      <div>
+                        <h2 className="text-3xl font-semibold">Duel finished</h2>
+                        <p className="text-slate-300">The final leaderboard is locked in.</p>
+                      </div>
                     </div>
-                  </div>
-                  {game.leaderboard[0] ? (
-                    <div className="rounded-[24px] border border-amber-300/25 bg-amber-400/12 p-5">
-                      <p className="text-xs uppercase tracking-[0.2em] text-amber-100/70">Winner</p>
-                      <p className="mt-2 text-3xl font-semibold">{game.leaderboard[0].displayName}</p>
-                      <p className="mt-2 text-sm text-amber-50">
-                        {formatCorrectRatio(
-                          game.leaderboard[0].correctCount,
-                          game.leaderboard[0].answeredCount,
-                        )}{" "}
-                        correct
-                      </p>
-                    </div>
-                  ) : null}
-                  <div className="flex flex-wrap gap-3">
-                    {isHost ? (
-                      <Button
-                        onClick={async () => {
-                          if (!room.snapshot?.me) {
-                            return;
-                          }
+                    {game.leaderboard[0] ? (
+                      <div className="rounded-[24px] border border-amber-300/25 bg-amber-400/12 p-5">
+                        <p className="text-xs uppercase tracking-[0.2em] text-amber-100/70">Winner</p>
+                        <p className="mt-2 text-3xl font-semibold">{game.leaderboard[0].displayName}</p>
+                        <p className="mt-2 text-sm text-amber-50">
+                          {formatCorrectRatio(
+                            game.leaderboard[0].correctCount,
+                            game.leaderboard[0].answeredCount,
+                          )}{" "}
+                          correct
+                        </p>
+                      </div>
+                    ) : null}
+                    <div className="flex flex-wrap gap-3">
+                      {orderedReviewPlayers.length ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => setShowWrongQuestions((current) => !current)}
+                        >
+                          {showWrongQuestions ? "Hide wrong questions" : "View wrong questions"}
+                        </Button>
+                      ) : null}
+                      {isHost ? (
+                        <Button
+                          onClick={async () => {
+                            if (!room.snapshot?.me) {
+                              return;
+                            }
 
-                          try {
-                            await room.roomAction({
-                              action: "replay",
-                              actorToken: room.snapshot.me.player_token,
-                            });
-                          } catch (replayError) {
-                            setStatusMessage(
-                              replayError instanceof Error
-                                ? replayError.message
-                                : "Unable to reset the lobby.",
-                            );
-                          }
-                        }}
-                      >
-                        <RefreshCcw className="mr-2 size-4" />
-                        Replay
+                            try {
+                              await room.roomAction({
+                                action: "replay",
+                                actorToken: room.snapshot.me.player_token,
+                              });
+                            } catch (replayError) {
+                              setStatusMessage(
+                                replayError instanceof Error
+                                  ? replayError.message
+                                  : "Unable to reset the lobby.",
+                              );
+                            }
+                          }}
+                        >
+                          <RefreshCcw className="mr-2 size-4" />
+                          Replay
+                        </Button>
+                      ) : (
+                        <Badge tone="muted">Waiting for the host to replay or start another duel.</Badge>
+                      )}
+                      <Button variant="ghost" onClick={handleLeave}>
+                        Leave room
                       </Button>
-                    ) : (
-                      <Badge tone="muted">Waiting for the host to replay or start another duel.</Badge>
-                    )}
-                    <Button variant="ghost" onClick={handleLeave}>
-                      Leave room
-                    </Button>
-                  </div>
-                </Card>
+                    </div>
+                  </Card>
+
+                  {showWrongQuestions && selectedReviewPlayer ? (
+                    <Card className="space-y-5">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                        <div>
+                          <h3 className="text-2xl font-semibold">Wrong question review</h3>
+                          <p className="text-slate-300">
+                            Switch between players to revisit misses, timeouts, and category results.
+                          </p>
+                        </div>
+                        <Badge tone={selectedReviewPlayer.wrongQuestions.length ? "danger" : "cool"}>
+                          {selectedReviewPlayer.wrongQuestions.length
+                            ? `${selectedReviewPlayer.wrongQuestions.length} to review`
+                            : "Perfect game"}
+                        </Badge>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {orderedReviewPlayers.map((review) => (
+                          <Button
+                            key={review.playerId}
+                            size="sm"
+                            variant={review.playerId === selectedReviewPlayer.playerId ? "secondary" : "ghost"}
+                            onClick={() => setSelectedReviewPlayerId(review.playerId)}
+                          >
+                            {review.displayName}
+                          </Button>
+                        ))}
+                      </div>
+
+                      {reviewCategoryRows.length ? (
+                        <div className="space-y-3">
+                          <div>
+                            <h4 className="text-lg font-semibold">Category stats</h4>
+                            <p className="text-sm text-slate-300">
+                              Correct answers by category for every player in this duel.
+                            </p>
+                          </div>
+                          <div className="overflow-x-auto rounded-[24px] border border-white/10 bg-white/5">
+                            <table className="min-w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-white/10 text-left text-slate-300">
+                                  <th className="px-4 py-3 font-medium">Category</th>
+                                  {orderedReviewPlayers.map((review) => (
+                                    <th key={review.playerId} className="px-4 py-3 font-medium">
+                                      {review.displayName}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {reviewCategoryRows.map((categoryRow) => (
+                                  <tr key={categoryRow.categoryId} className="border-b border-white/5 last:border-b-0">
+                                    <td className="px-4 py-3 font-medium text-white">
+                                      {categoryRow.categoryName}
+                                    </td>
+                                    {orderedReviewPlayers.map((review) => {
+                                      const stat = reviewStatLookup
+                                        .get(review.playerId)
+                                        ?.get(categoryRow.categoryId);
+
+                                      return (
+                                        <td key={review.playerId} className="px-4 py-3 text-slate-200">
+                                          {stat
+                                            ? formatCorrectRatio(stat.correctCount, stat.totalCount)
+                                            : "0/0"}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="space-y-3">
+                        <div>
+                          <h4 className="text-lg font-semibold">
+                            {selectedReviewPlayer.displayName}&apos;s review
+                          </h4>
+                          <p className="text-sm text-slate-300">
+                            Every question this player missed or timed out on.
+                          </p>
+                        </div>
+
+                        {selectedReviewPlayer.wrongQuestions.length ? (
+                          <div className="space-y-4">
+                            {selectedReviewPlayer.wrongQuestions.map((review) => (
+                              <div
+                                key={review.answerId}
+                                className="rounded-[24px] border border-white/10 bg-white/5 p-4"
+                              >
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge tone={review.timedOut ? "danger" : "muted"}>
+                                    Round {review.roundNumber}
+                                  </Badge>
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium tracking-wide",
+                                      getCategoryBadgeClass(review.categoryId),
+                                    )}
+                                  >
+                                    {review.categoryName}
+                                  </span>
+                                  <Badge tone={review.timedOut ? "danger" : "muted"}>
+                                    {review.timedOut ? "Timed out" : "Answered wrong"}
+                                  </Badge>
+                                </div>
+                                <h5 className="mt-3 text-lg font-semibold">{review.prompt}</h5>
+                                <div className="mt-4 grid gap-2">
+                                  {review.answers.map((answer) => (
+                                    <div
+                                      key={`${review.answerId}-${answer.displayIndex}`}
+                                      className={cn(
+                                        "rounded-[18px] border px-3 py-3 text-sm",
+                                        answer.isCorrect
+                                          ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-50"
+                                          : answer.isSelected
+                                            ? "border-rose-300/25 bg-rose-500/10 text-rose-50"
+                                            : "border-white/10 bg-slate-950/45 text-slate-200",
+                                      )}
+                                    >
+                                      <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <span>{answer.text}</span>
+                                        <div className="flex flex-wrap gap-2">
+                                          {answer.isSelected ? (
+                                            <Badge tone={answer.isCorrect ? "warm" : "danger"}>
+                                              {answer.isCorrect ? "Your correct pick" : "Your pick"}
+                                            </Badge>
+                                          ) : null}
+                                          {!answer.isSelected && answer.isCorrect ? (
+                                            <Badge tone="cool">Correct answer</Badge>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                {review.explanation ? (
+                                  <div className="mt-4 rounded-[18px] border border-sky-300/20 bg-sky-500/10 p-3 text-sm text-sky-50">
+                                    <p className="text-xs uppercase tracking-[0.2em] text-sky-200/75">
+                                      Explanation
+                                    </p>
+                                    <p className="mt-2">{review.explanation}</p>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-[24px] border border-emerald-400/20 bg-emerald-500/10 p-4 text-emerald-50">
+                            <p className="font-medium">{selectedReviewPlayer.displayName} got every question right.</p>
+                            <p className="mt-1 text-sm text-emerald-100/85">
+                              There are no wrong questions to review for this player.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+                  ) : null}
+                </>
               ) : null}
             </div>
 

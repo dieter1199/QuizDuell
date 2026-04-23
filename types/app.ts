@@ -118,6 +118,40 @@ export type RoundSnapshot = {
   submissions: PlayerAnswerSnapshot[];
 };
 
+export type ReviewedAnswerOption = {
+  displayIndex: number;
+  text: string;
+  isSelected: boolean;
+  isCorrect: boolean;
+};
+
+export type WrongQuestionReview = {
+  answerId: string;
+  roundId: string;
+  roundNumber: number;
+  questionId: string;
+  categoryId: string;
+  categoryName: string;
+  prompt: string;
+  explanation: string | null;
+  timedOut: boolean;
+  answers: ReviewedAnswerOption[];
+};
+
+export type PlayerCategoryStat = {
+  categoryId: string;
+  categoryName: string;
+  correctCount: number;
+  totalCount: number;
+};
+
+export type PlayerGameReview = {
+  playerId: string;
+  displayName: string;
+  categoryStats: PlayerCategoryStat[];
+  wrongQuestions: WrongQuestionReview[];
+};
+
 export type LeaderboardEntry = {
   playerId: string;
   displayName: string;
@@ -138,6 +172,7 @@ export type GameSnapshot = {
   session: GameSessionRecord;
   currentRound: RoundSnapshot | null;
   leaderboard: LeaderboardEntry[];
+  playerReviews: PlayerGameReview[];
   submittedAnswerCount: number;
   requiredAnswerCount: number;
 };

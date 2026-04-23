@@ -11,17 +11,29 @@ import {
 } from "@/lib/game";
 import { ApiError } from "@/lib/server/api";
 import { getCategoryBank } from "@/lib/server/content-service";
-import { findRoomByGameId, getRoomFromStore, setRoomInStore, type StoredRoom } from "@/lib/server/room-store";
+import {
+  findRoomByGameId,
+  getRoomFromStore,
+  setRoomInStore,
+  type StoredGameSession,
+  type StoredRoom,
+} from "@/lib/server/room-store";
 import { generateRoomCode, sanitizeName } from "@/lib/utils";
 import type {
+  CategoryWithQuestions,
+  GameRoundRow,
   LeaderboardEntry,
   PlayerAnswerRow,
   PlayerAnswerSnapshot,
+  PlayerCategoryStat,
+  PlayerGameReview,
+  QuestionRecord,
   RoomPlayerRow,
   RoomPlayerSnapshot,
   RoomRecord,
   RoomSettings,
   RoomSnapshot,
+  RoundAnswerOption,
 } from "@/types/app";
 
 function nowIso() {
@@ -279,6 +291,136 @@ function buildLeaderboard(players: RoomPlayerSnapshot[]): LeaderboardEntry[] {
     );
 }
 
+type ReviewRoundMeta = {
+  round: GameRoundRow;
+  question: QuestionRecord;
+  categoryId: string;
+  categoryName: string;
+  answers: RoundAnswerOption[];
+};
+
+function buildPlayerReviews(
+  players: RoomPlayerSnapshot[],
+  game: StoredGameSession,
+  categories: CategoryWithQuestions[],
+) {
+  const questionLookup = new Map(
+    categories.flatMap((category) => category.questions.map((question) => [question.id, question] as const)),
+  );
+  const categoryLookup = new Map(categories.map((category) => [category.id, category] as const));
+  const roundMetaById = new Map<string, ReviewRoundMeta>();
+  const categoryTotals = new Map<string, { categoryName: string; totalCount: number }>();
+  const categoryOrder: string[] = [];
+
+  for (const round of [...game.rounds].sort((left, right) => left.round_number - right.round_number)) {
+    const question = questionLookup.get(round.question_id);
+
+    if (!question) {
+      continue;
+    }
+
+    const category = categoryLookup.get(question.category_id);
+    const categoryName = category?.name ?? "Unknown category";
+
+    roundMetaById.set(round.id, {
+      round,
+      question,
+      categoryId: question.category_id,
+      categoryName,
+      answers: buildRoundAnswers(question, round.answer_order),
+    });
+
+    const currentTotals = categoryTotals.get(question.category_id) ?? {
+      categoryName,
+      totalCount: 0,
+    };
+
+    currentTotals.totalCount += 1;
+    currentTotals.categoryName = categoryName;
+    categoryTotals.set(question.category_id, currentTotals);
+
+    if (!categoryOrder.includes(question.category_id)) {
+      categoryOrder.push(question.category_id);
+    }
+  }
+
+  const playersWithAnswers = new Set(game.answers.map((answer) => answer.player_id));
+  const reviewPlayers = players.filter(
+    (player) => player.status === "active" || playersWithAnswers.has(player.id),
+  );
+  const reviewsByPlayerId = new Map<string, PlayerGameReview>();
+  const categoryStatsByPlayerId = new Map<string, Map<string, PlayerCategoryStat>>();
+
+  for (const player of reviewPlayers) {
+    const categoryStats = categoryOrder.map((categoryId) => {
+      const totals = categoryTotals.get(categoryId);
+
+      return {
+        categoryId,
+        categoryName: totals?.categoryName ?? "Unknown category",
+        correctCount: 0,
+        totalCount: totals?.totalCount ?? 0,
+      };
+    });
+
+    reviewsByPlayerId.set(player.id, {
+      playerId: player.id,
+      displayName: player.display_name,
+      categoryStats,
+      wrongQuestions: [],
+    });
+    categoryStatsByPlayerId.set(
+      player.id,
+      new Map(categoryStats.map((stat) => [stat.categoryId, stat] as const)),
+    );
+  }
+
+  for (const answer of game.answers) {
+    const review = reviewsByPlayerId.get(answer.player_id);
+    const roundMeta = roundMetaById.get(answer.round_id);
+
+    if (!review || !roundMeta) {
+      continue;
+    }
+
+    const categoryStat = categoryStatsByPlayerId
+      .get(answer.player_id)
+      ?.get(roundMeta.categoryId);
+
+    if (categoryStat) {
+      categoryStat.correctCount += Number(answer.is_correct);
+    }
+
+    if (answer.is_correct) {
+      continue;
+    }
+
+    review.wrongQuestions.push({
+      answerId: answer.id,
+      roundId: roundMeta.round.id,
+      roundNumber: roundMeta.round.round_number,
+      questionId: roundMeta.question.id,
+      categoryId: roundMeta.categoryId,
+      categoryName: roundMeta.categoryName,
+      prompt: roundMeta.question.prompt,
+      explanation: roundMeta.question.explanation,
+      timedOut: answer.timed_out,
+      answers: roundMeta.answers.map((option) => ({
+        displayIndex: option.displayIndex,
+        text: option.text,
+        isSelected: answer.selected_indexes.includes(option.displayIndex),
+        isCorrect: option.isCorrect,
+      })),
+    });
+  }
+
+  for (const review of reviewsByPlayerId.values()) {
+    review.wrongQuestions.sort((left, right) => left.roundNumber - right.roundNumber);
+  }
+
+  return reviewPlayers.map((player) => reviewsByPlayerId.get(player.id)!);
+}
+
 async function buildSnapshot(room: StoredRoom, playerToken?: string) {
   reconcileRoomPresence(room);
 
@@ -320,6 +462,7 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
     ? game.answers.filter((answer) => answer.round_id === currentRound.id)
     : [];
   const playerLookup = new Map(playersWithResults.map((player) => [player.id, player]));
+  const playerReviews = buildPlayerReviews(playersWithResults, game, categories);
 
   return {
     room: roomRecord,
@@ -358,6 +501,7 @@ async function buildSnapshot(room: StoredRoom, playerToken?: string) {
             }
           : null,
       leaderboard: buildLeaderboard(playersWithResults),
+      playerReviews,
       submittedAnswerCount: submissions.length,
       requiredAnswerCount: playersWithResults.filter((player) => player.status === "active").length,
     },
