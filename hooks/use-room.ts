@@ -146,6 +146,7 @@ export function useRoom(code: string, profile: PlayerProfile | null) {
       !snapshot?.game ||
       snapshot.game.session.phase === "finished" ||
       snapshot.game.session.phase !== "question" ||
+      snapshot.game.session.settings.timerEnabled === false ||
       snapshot.game.session.is_paused
     ) {
       return;

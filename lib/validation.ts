@@ -39,6 +39,7 @@ export const questionSchema = z.object({
 export const roomSettingsSchema = z.object({
   questionCount: z.number().int().min(1).max(30),
   useAllQuestions: z.boolean(),
+  timerEnabled: z.boolean(),
   timerSeconds: z.number().int().min(5).max(30),
   selectedCategoryIds: z.array(z.string().uuid()).min(1, "Select at least one category."),
   randomizeQuestionOrder: z.boolean(),

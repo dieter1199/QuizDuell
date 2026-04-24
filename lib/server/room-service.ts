@@ -88,7 +88,7 @@ function cloneRoomRecord(room: StoredRoom): RoomRecord {
     code: room.code,
     status: room.status,
     version: room.version ?? 0,
-    settings: structuredClone(room.settings),
+    settings: normalizeRoomSettings(room.settings),
     host_player_id: room.host_player_id,
     current_game_id: room.current_game_id,
     closed_reason: room.closed_reason,
@@ -238,7 +238,11 @@ async function maybeAdvanceGame(room: StoredRoom, options?: { advanceReveal?: bo
   const roundAnswers = game.answers.filter((answer) => answer.round_id === currentRound.id);
 
   if (game.phase === "question") {
-    if (now < phaseEndsAt && roundAnswers.length < activePlayers.length) {
+    const isTimerEnabled = game.settings.timerEnabled !== false;
+    const isWaitingForAnswers = roundAnswers.length < activePlayers.length;
+    const isTimerStillRunning = isTimerEnabled && now < phaseEndsAt;
+
+    if (isWaitingForAnswers && (!isTimerEnabled || isTimerStillRunning)) {
       return game;
     }
 
@@ -286,9 +290,9 @@ async function maybeAdvanceGame(room: StoredRoom, options?: { advanceReveal?: bo
   game.phase = "question";
   clearPauseState(room);
   game.phase_started_at = now.toISOString();
-  game.phase_ends_at = new Date(
-    now.getTime() + game.settings.timerSeconds * 1000,
-  ).toISOString();
+  game.phase_ends_at = game.settings.timerEnabled !== false
+    ? new Date(now.getTime() + game.settings.timerSeconds * 1000).toISOString()
+    : now.toISOString();
   touchRoom(room);
 
   return game;
@@ -846,7 +850,9 @@ export async function startGame(roomCode: string, actorToken: string) {
       total_rounds: questionsForGame.length,
       settings: structuredClone(settings),
       phase_started_at: timestamp,
-      phase_ends_at: new Date(Date.now() + settings.timerSeconds * 1000).toISOString(),
+      phase_ends_at: settings.timerEnabled
+        ? new Date(Date.now() + settings.timerSeconds * 1000).toISOString()
+        : timestamp,
       started_at: timestamp,
       ended_at: null,
       rounds: questionsForGame.map((question, index) => ({

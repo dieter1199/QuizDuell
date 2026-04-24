@@ -10,6 +10,7 @@ export const ROOM_CODE_LENGTH = 6;
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   questionCount: 20,
   useAllQuestions: false,
+  timerEnabled: true,
   timerSeconds: 10,
   selectedCategoryIds: [],
   randomizeQuestionOrder: true,

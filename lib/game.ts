@@ -24,6 +24,10 @@ export function normalizeRoomSettings(
       typeof candidate.useAllQuestions === "boolean"
         ? candidate.useAllQuestions
         : base.useAllQuestions,
+    timerEnabled:
+      typeof candidate.timerEnabled === "boolean"
+        ? candidate.timerEnabled
+        : base.timerEnabled,
     timerSeconds:
       typeof candidate.timerSeconds === "number" ? candidate.timerSeconds : base.timerSeconds,
     selectedCategoryIds:

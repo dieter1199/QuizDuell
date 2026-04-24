@@ -8,6 +8,7 @@ export type GameStatus = "active" | "finished" | "cancelled";
 export type RoomSettings = {
   questionCount: number;
   useAllQuestions: boolean;
+  timerEnabled: boolean;
   timerSeconds: number;
   selectedCategoryIds: string[];
   randomizeQuestionOrder: boolean;

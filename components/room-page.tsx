@@ -233,6 +233,7 @@ export function RoomPage({ code }: RoomPageProps) {
   const isGamePaused = Boolean(game?.session.is_paused);
   const isQuestionPhase = game?.session.phase === "question";
   const isRevealPhase = game?.session.phase === "reveal";
+  const isRoundTimerEnabled = game?.session.settings.timerEnabled !== false;
   const isLiveGame = Boolean(
     game && room.snapshot?.room.status === "active" && game.session.status === "active",
   );
@@ -263,7 +264,7 @@ export function RoomPage({ code }: RoomPageProps) {
   );
   const hasSubmittedOrPending = hasSubmitted || isSubmittingAnswer;
   const estimatedServerNow = now + room.serverClockOffsetMs;
-  const phaseMsRemaining = game && isQuestionPhase
+  const phaseMsRemaining = game && isQuestionPhase && isRoundTimerEnabled
     ? game.session.is_paused
       ? game.session.paused_ms_remaining ?? 0
       : Math.max(0, new Date(game.session.phase_ends_at).getTime() - estimatedServerNow)
@@ -596,6 +597,7 @@ export function RoomPage({ code }: RoomPageProps) {
       !currentRoundId ||
       activePhase !== "question" ||
       !activePhaseEndsAt ||
+      !isRoundTimerEnabled ||
       isGamePaused ||
       hasSubmittedOrPending ||
       selectedIndexes.length === 0 ||
@@ -624,6 +626,7 @@ export function RoomPage({ code }: RoomPageProps) {
     currentRoundId,
     hasSubmittedOrPending,
     isGamePaused,
+    isRoundTimerEnabled,
     myPlayerToken,
     room.serverClockOffsetMs,
     selectedIndexes,
@@ -774,13 +777,15 @@ export function RoomPage({ code }: RoomPageProps) {
                     <div className="grid gap-3 md:justify-self-end">
                       <div className="w-full max-w-[9rem] rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-left md:min-w-32 md:text-right">
                         <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                          {isQuestionPhase ? "Timer" : "Continue"}
+                          {isQuestionPhase ? (isRoundTimerEnabled ? "Timer" : "Locks") : "Continue"}
                         </p>
                         <p className="mt-1 text-3xl font-semibold md:text-4xl">
                           {isGamePaused
                             ? "Paused"
                             : isQuestionPhase
-                              ? phaseSecondsRemaining
+                              ? isRoundTimerEnabled
+                                ? phaseSecondsRemaining
+                                : `${lockedPlayers.length}/${game.requiredAnswerCount}`
                               : isLastRound
                                 ? "Finish"
                                 : "Ready"}
@@ -789,7 +794,9 @@ export function RoomPage({ code }: RoomPageProps) {
                           {isGamePaused
                             ? "Frozen"
                             : isQuestionPhase
-                              ? "Live"
+                              ? isRoundTimerEnabled
+                                ? "Live"
+                                : "No timer"
                               : isHost
                                 ? "Host"
                                 : "Host only"}
@@ -808,7 +815,7 @@ export function RoomPage({ code }: RoomPageProps) {
                     </div>
                   </div>
 
-                  {isQuestionPhase && currentRound ? (
+                  {isQuestionPhase && currentRound && isRoundTimerEnabled ? (
                     <SmoothQuestionTimerBar
                       paused={isGamePaused}
                       pausedMsRemaining={game.session.paused_ms_remaining}
@@ -825,7 +832,9 @@ export function RoomPage({ code }: RoomPageProps) {
                       <p className="mt-2 text-sm">
                         The host paused this {game.session.phase === "question" ? "question" : "reveal"}.
                         {game.session.phase === "question"
-                          ? " Your current selection will stay ready until the duel resumes."
+                          ? isRoundTimerEnabled
+                            ? " Your current selection will stay ready until the duel resumes."
+                            : " This untimed question will keep waiting for every lock after resume."
                           : " The reveal will continue from the same remaining time after resume."}
                       </p>
                     </div>
@@ -894,7 +903,9 @@ export function RoomPage({ code }: RoomPageProps) {
                       <div className="text-sm text-slate-300">
                         {isGamePaused
                           ? "The host paused the duel. Your current selection is preserved, but answers stay locked until resume."
-                          : "Choose 1 or 2 answers. Exact matches count as correct, and selected answers auto-lock at 0."}
+                          : isRoundTimerEnabled
+                            ? "Choose 1 or 2 answers. Exact matches count as correct, and selected answers auto-lock at 0."
+                            : "Choose 1 or 2 answers. Exact matches count as correct. The reveal starts when everyone has locked in."}
                       </div>
                       <Button
                         disabled={isGamePaused || selectedIndexes.length === 0 || hasSubmittedOrPending}
@@ -995,7 +1006,9 @@ export function RoomPage({ code }: RoomPageProps) {
                       </div>
                       <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
                         <p className="text-sm text-slate-300">Timer</p>
-                        <p className="mt-2 text-3xl font-semibold">{settingsDraft?.timerSeconds ?? 10}s</p>
+                        <p className="mt-2 text-3xl font-semibold">
+                          {settingsDraft?.timerEnabled === false ? "Off" : `${settingsDraft?.timerSeconds ?? 10}s`}
+                        </p>
                       </div>
                       <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
                         <p className="text-sm text-slate-300">Question source</p>
@@ -1039,8 +1052,24 @@ export function RoomPage({ code }: RoomPageProps) {
                           />
                         </label>
                         <label className="block text-sm text-slate-200">
-                          <span className="mb-2 block">Timer in seconds</span>
+                          <span className="mb-2 flex items-center justify-between gap-3">
+                            <span>Timer in seconds</span>
+                            <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                              <input
+                                checked={!settingsDraft.timerEnabled}
+                                type="checkbox"
+                                onChange={(event) =>
+                                  updateSettingsDraftLocally((current) => ({
+                                    ...current,
+                                    timerEnabled: !event.target.checked,
+                                  }))
+                                }
+                              />
+                              No timer
+                            </span>
+                          </span>
                           <Input
+                            disabled={!settingsDraft.timerEnabled}
                             min={5}
                             max={30}
                             type="number"
@@ -1556,7 +1585,9 @@ export function RoomPage({ code }: RoomPageProps) {
                   {isGamePaused ? (
                     <p className="text-sm text-slate-300">
                       {isQuestionPhase
-                        ? `The host paused this question with ${phaseSecondsRemaining}s remaining.`
+                        ? isRoundTimerEnabled
+                          ? `The host paused this question with ${phaseSecondsRemaining}s remaining.`
+                          : "The host paused this untimed question."
                         : "The host paused the reveal before the next question could start."}
                     </p>
                   ) : null}
